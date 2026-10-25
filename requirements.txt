@@ -1,5 +1,5 @@
 streamlit
 pandas
 openpyxl
-supabase
+supabase>=2.15.0
 xlrd
