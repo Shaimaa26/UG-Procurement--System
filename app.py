@@ -373,6 +373,88 @@ def add_basic_form(table, fields, title):
             st.error(f"Could not save record: {exc}")
 
 
+
+def build_template(label, include_id=False):
+    """Create an Excel template for one section, with instructions
+    and reference sheets that list the IDs needed for linked fields."""
+    config = TABLES[label]
+    columns = [
+        c for c in config["columns"] if include_id or c != "id"
+    ]
+
+    notes = {
+        "id": "Only needed when updating existing records.",
+        "supplier_id": "Use the supplier ID (see 'Suppliers ref' sheet).",
+        "project_id": "Use the project ID (see 'Projects ref' sheet).",
+        "product_id": "Use the product ID (see 'Products ref' sheet).",
+        "purchase_order_id": "Use the PO ID (see 'PO ref' sheet).",
+        "stock_classification": "Use exactly: " + ", ".join(STOCK_TYPES),
+        "receipt_date": "Date format: YYYY-MM-DD",
+        "order_date": "Date format: YYYY-MM-DD",
+        "quantity": "Number, zero or more.",
+        "unit_price": "Number, zero or more.",
+    }
+
+    instructions = pd.DataFrame({
+        "Column": columns,
+        "Required": [
+            "YES" if c in config["required"] else "no" for c in columns
+        ],
+        "Notes": [notes.get(c, "") for c in columns],
+    })
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        pd.DataFrame(columns=columns).to_excel(
+            writer, sheet_name="Template", index=False
+        )
+        instructions.to_excel(writer, sheet_name="Instructions", index=False)
+
+        references = [
+            ("Suppliers ref", "suppliers", ["id", "supplier_name"]),
+            ("Projects ref", "projects", ["id", "project_name"]),
+            ("Products ref", "products", ["id", "product_name", "model"]),
+            ("PO ref", "purchase_orders", ["id", "po_number"]),
+        ]
+
+        for sheet_name, ref_table, ref_columns in references:
+            try:
+                rows = fetch_rows(ref_table)
+                ref_df = pd.DataFrame(rows)
+                for col in ref_columns:
+                    if col not in ref_df.columns:
+                        ref_df[col] = None
+                ref_df = ref_df[ref_columns]
+            except Exception:
+                ref_df = pd.DataFrame(columns=ref_columns)
+            ref_df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+        # Light formatting: bold headers, required columns in yellow
+        from openpyxl.styles import Font, PatternFill
+
+        bold = Font(bold=True)
+        yellow = PatternFill("solid", fgColor="FFF2CC")
+
+        for ws in writer.book.worksheets:
+            for cell in ws[1]:
+                cell.font = bold
+                if (
+                    ws.title == "Template"
+                    and cell.value in config["required"]
+                ):
+                    cell.fill = yellow
+            for column_cells in ws.columns:
+                width = max(
+                    len(str(c.value)) if c.value is not None else 0
+                    for c in column_cells
+                )
+                ws.column_dimensions[column_cells[0].column_letter].width = (
+                    min(max(width + 2, 14), 45)
+                )
+
+    return output.getvalue()
+
+
 # =========================================================
 # LOGIN
 # =========================================================
@@ -418,26 +500,6 @@ with st.sidebar:
         st.session_state["authenticated"] = False
         st.rerun()
 
-
-    # ---------- TEMPORARY CONNECTION TEST ----------
-with st.expander("Connection test"):
-    import httpx
-    base = st.secrets["SUPABASE_URL"].rstrip("/")
-    key = st.secrets["SUPABASE_KEY"]
-    st.write("URL:", base)
-    for t in ["suppliers", "projects", "products", "inventory",
-              "purchase_orders", "purchase_order_items", "attachments"]:
-        try:
-            r = httpx.get(
-                f"{base}/rest/v1/{t}?select=*&limit=1",
-                headers={"apikey": key, "Authorization": f"Bearer {key}"},
-                timeout=15,
-            )
-            st.write(t, r.status_code, r.text[:200])
-        except Exception as exc:
-            st.write(t, "FAILED:", exc)
-
-# ---------- END TEST ----------
 
 # =========================================================
 # DASHBOARD
@@ -552,6 +614,42 @@ elif page == "Purchase Order Items":
 
 elif page == "Excel Import":
     st.subheader("Excel / CSV Import")
+
+    # ---------- Template download ----------
+    with st.expander("Download Excel template for a section", expanded=True):
+        template_label = st.selectbox(
+            "Section", list(TABLES.keys()), key="template_section"
+        )
+        template_with_id = st.checkbox(
+            "Include 'id' column (only for updating existing records)",
+            value=False,
+            key="template_with_id",
+        )
+
+        try:
+            template_bytes = build_template(template_label, template_with_id)
+            st.download_button(
+                f"Download {template_label} template",
+                template_bytes,
+                file_name=(
+                    f"{TABLES[template_label]['table']}_template.xlsx"
+                ),
+                mime=(
+                    "application/vnd.openxmlformats-officedocument."
+                    "spreadsheetml.sheet"
+                ),
+                key="template_download",
+            )
+            st.caption(
+                "Fill the 'Template' sheet only. Yellow headers are "
+                "required. The 'Instructions' and '... ref' sheets show "
+                "the rules and the IDs to use for linked fields. "
+                "Then upload the file below."
+            )
+        except Exception as exc:
+            st.error(f"Could not build template: {exc}")
+
+    st.divider()
 
     uploaded = st.file_uploader(
         "Upload Excel or CSV file",
