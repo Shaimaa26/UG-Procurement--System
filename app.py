@@ -419,6 +419,26 @@ with st.sidebar:
         st.rerun()
 
 
+    # ---------- TEMPORARY CONNECTION TEST ----------
+with st.expander("Connection test"):
+    import httpx
+    base = st.secrets["SUPABASE_URL"].rstrip("/")
+    key = st.secrets["SUPABASE_KEY"]
+    st.write("URL:", base)
+    for t in ["suppliers", "projects", "products", "inventory",
+              "purchase_orders", "purchase_order_items", "attachments"]:
+        try:
+            r = httpx.get(
+                f"{base}/rest/v1/{t}?select=*&limit=1",
+                headers={"apikey": key, "Authorization": f"Bearer {key}"},
+                timeout=15,
+            )
+            st.write(t, r.status_code, r.text[:200])
+        except Exception as exc:
+            st.write(t, "FAILED:", exc)
+
+# ---------- END TEST ----------
+
 # =========================================================
 # DASHBOARD
 # =========================================================
