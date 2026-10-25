@@ -1,4 +1,3 @@
-
 import io
 import re
 from datetime import date, datetime
@@ -328,28 +327,28 @@ def add_basic_form(table, fields, title):
                 options = [None] + list(choices.keys())
                 values[field] = st.selectbox(
                     label, options,
-                    format_func=lambda x: "-- None --" if x is None else choices[x],
+                    format_func=lambda x, c=choices: "-- None --" if x is None else c[x],
                 )
             elif kind == "project":
                 choices = get_choices("projects", "project_name")
                 options = [None] + list(choices.keys())
                 values[field] = st.selectbox(
                     label, options,
-                    format_func=lambda x: "-- None --" if x is None else choices[x],
+                    format_func=lambda x, c=choices: "-- None --" if x is None else c[x],
                 )
             elif kind == "product":
                 choices = get_choices("products", "product_name")
                 options = [None] + list(choices.keys())
                 values[field] = st.selectbox(
                     label, options,
-                    format_func=lambda x: "-- None --" if x is None else choices[x],
+                    format_func=lambda x, c=choices: "-- None --" if x is None else c[x],
                 )
             elif kind == "po":
                 choices = get_choices("purchase_orders", "po_number")
                 options = [None] + list(choices.keys())
                 values[field] = st.selectbox(
                     label, options,
-                    format_func=lambda x: "-- None --" if x is None else choices[x],
+                    format_func=lambda x, c=choices: "-- None --" if x is None else c[x],
                 )
             elif kind == "stock":
                 values[field] = st.selectbox(label, STOCK_TYPES)
@@ -526,6 +525,7 @@ elif page == "Purchase Order Items":
     )
     display_table("purchase_order_items")
 
+
 # =========================================================
 # EXCEL IMPORT
 # =========================================================
@@ -602,7 +602,7 @@ elif page == "Excel Import":
                 if target_column != "-- Ignore --":
                     mapped[target_column] = source_df[source_column]
 
-            mapped = mapped.where(pd.notna(mapped), None)
+            mapped = mapped.astype(object).where(pd.notna(mapped), None)
             mapped = mapped.dropna(how="all").reset_index(drop=True)
 
             if mapped.empty:
@@ -809,10 +809,14 @@ elif page == "Excel Import":
                         mime="text/csv",
                     )
 
+        except Exception as exc:
+            st.error(f"Import error: {exc}")
+
 
 # =========================================================
 # DOCUMENT MANAGEMENT
 # =========================================================
+
 elif page == "Documents":
     st.subheader("Documents")
 
