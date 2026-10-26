@@ -493,6 +493,7 @@ with st.sidebar:
         "Navigation",
         [
             "Dashboard",
+            "Search",
             "Suppliers",
             "Projects",
             "Products",
@@ -615,6 +616,287 @@ elif page == "Purchase Order Items":
         "Add Purchase Order Item",
     )
     display_table("purchase_order_items")
+
+
+# -----------------------------------------------------
+# Feature: SEARCH any section
+# -----------------------------------------------------
+
+elif page == "Search":
+    st.subheader("Search")
+
+    mode = st.radio(
+        "What do you want to find?",
+        [
+            "Search any section",
+            "Suppliers by category (with products & prices)",
+        ],
+        horizontal=True,
+    )
+
+    # -----------------------------------------------------
+    # MODE 1: SEARCH ANY SECTION
+    # -----------------------------------------------------
+    if mode == "Search any section":
+        section = st.selectbox(
+            "Section", list(TABLES.keys()), key="search_section"
+        )
+        table = TABLES[section]["table"]
+
+        rows = fetch_rows(table)
+        if not rows:
+            st.info("No records found in this section.")
+            st.stop()
+
+        df = pd.DataFrame(rows)
+
+        # Show names next to ID columns so results are readable
+        search_lookups = {
+            "supplier_id": ("suppliers", "supplier_name", "supplier_name"),
+            "project_id": ("projects", "project_name", "project_name"),
+            "product_id": ("products", "product_name", "product_name"),
+            "purchase_order_id": ("purchase_orders", "po_number", "po_number"),
+        }
+
+        for fk, (ref_table, label_col, new_name) in search_lookups.items():
+            if fk in df.columns and new_name not in df.columns:
+                try:
+                    names = get_choices(ref_table, label_col)
+                except Exception:
+                    continue
+                df.insert(
+                    df.columns.get_loc(fk) + 1,
+                    new_name,
+                    df[fk].map(names),
+                )
+
+        keyword = st.text_input(
+            "Search in all columns", key="search_keyword"
+        )
+
+        filter_cols = st.multiselect(
+            "Filter by column (optional)",
+            list(df.columns),
+            key="search_filter_cols",
+        )
+
+        filtered = df.copy()
+
+        for col in filter_cols:
+            values = filtered[col].dropna().astype(str).unique()
+            if len(values) <= 50:
+                chosen = st.multiselect(
+                    f"{col}", sorted(values), key=f"search_f_{section}_{col}"
+                )
+                if chosen:
+                    filtered = filtered[
+                        filtered[col].astype(str).isin(chosen)
+                    ]
+            else:
+                text = st.text_input(
+                    f"{col} contains", key=f"search_t_{section}_{col}"
+                )
+                if text:
+                    filtered = filtered[
+                        filtered[col].astype(str).str.contains(
+                            text, case=False, na=False, regex=False
+                        )
+                    ]
+
+        if keyword:
+            mask = (
+                filtered.astype(str)
+                .apply(
+                    lambda c: c.str.contains(
+                        keyword, case=False, na=False, regex=False
+                    )
+                )
+                .any(axis=1)
+            )
+            filtered = filtered[mask]
+
+        c1, c2 = st.columns(2)
+        c1.metric("Records found", len(filtered))
+        c2.metric("Total records in section", len(df))
+
+        st.dataframe(filtered, use_container_width=True, hide_index=True)
+
+        st.download_button(
+            "Download results (CSV)",
+            filtered.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"search_{table}.csv",
+            mime="text/csv",
+            key="search_csv_any",
+        )
+
+    # -----------------------------------------------------
+    # MODE 2: SUPPLIERS BY CATEGORY WITH PRODUCTS & PRICES
+    # -----------------------------------------------------
+    else:
+        def search_ensure(df, cols):
+            for c in cols:
+                if c not in df.columns:
+                    df[c] = None
+            return df
+
+        suppliers = pd.DataFrame(fetch_rows("suppliers"))
+        if suppliers.empty:
+            st.info("No suppliers yet.")
+            st.stop()
+
+        suppliers = search_ensure(suppliers, [
+            "id", "supplier_name", "category", "products", "contact_person",
+            "contact_title", "email", "phone", "payment_terms",
+        ])
+
+        categories = sorted({
+            str(c).strip() for c in suppliers["category"].dropna()
+            if str(c).strip()
+        })
+
+        col1, col2 = st.columns(2)
+        category = col1.selectbox(
+            "Category", ["All categories"] + categories, key="search_category"
+        )
+        keyword2 = col2.text_input(
+            "Keyword (supplier, product, contact...)", key="search_keyword2"
+        )
+
+        filtered_sup = suppliers.copy()
+        if category != "All categories":
+            filtered_sup = filtered_sup[
+                filtered_sup["category"].astype(str).str.strip().str.lower()
+                == category.lower()
+            ]
+
+        if filtered_sup.empty:
+            st.info("No suppliers found in this category.")
+            st.stop()
+
+        products = search_ensure(pd.DataFrame(fetch_rows("products")), [
+            "id", "product_name", "manufacturer", "model", "unit",
+            "supplier_id",
+        ])
+        pos = search_ensure(pd.DataFrame(fetch_rows("purchase_orders")), [
+            "id", "po_number", "supplier_id", "order_date", "currency",
+            "status",
+        ])
+        items = search_ensure(
+            pd.DataFrame(fetch_rows("purchase_order_items")),
+            ["purchase_order_id", "product_id", "quantity", "unit_price"],
+        )
+
+        sup_small = filtered_sup[[
+            "id", "supplier_name", "category", "products", "contact_person",
+            "contact_title", "email", "phone", "payment_terms",
+        ]].rename(columns={"id": "sid", "products": "products_listed"})
+
+        po_small = pos[[
+            "id", "po_number", "supplier_id", "order_date", "currency",
+            "status",
+        ]].rename(columns={"id": "po_id", "supplier_id": "sid"})
+
+        item_small = items[[
+            "purchase_order_id", "product_id", "quantity", "unit_price",
+        ]]
+
+        prod_small = products[[
+            "id", "product_name", "manufacturer", "model", "unit",
+            "supplier_id",
+        ]].rename(columns={"id": "product_id", "supplier_id": "prod_sid"})
+
+        # A) Products that have prices from purchase orders
+        priced = item_small.merge(
+            po_small, left_on="purchase_order_id", right_on="po_id",
+            how="inner",
+        )
+        priced = priced.merge(
+            prod_small.drop(columns=["prod_sid"]), on="product_id", how="left"
+        )
+        priced = priced.merge(sup_small, on="sid", how="inner")
+
+        # B) Products linked to the supplier but never ordered (no price yet)
+        linked = prod_small.rename(columns={"prod_sid": "sid"}).merge(
+            sup_small, on="sid", how="inner"
+        )
+        priced_pairs = set(zip(priced["sid"], priced["product_id"]))
+        linked = linked[[
+            (s, p) not in priced_pairs
+            for s, p in zip(linked["sid"], linked["product_id"])
+        ]]
+
+        # C) Suppliers with no products or prices at all
+        covered = set(priced["sid"]) | set(linked["sid"])
+        no_data = sup_small[~sup_small["sid"].isin(covered)]
+
+        result = pd.concat([priced, linked, no_data], ignore_index=True)
+
+        result["line_total"] = (
+            pd.to_numeric(result["quantity"], errors="coerce")
+            * pd.to_numeric(result["unit_price"], errors="coerce")
+        )
+
+        display_columns = [
+            "supplier_name", "category", "contact_person", "contact_title",
+            "email", "phone", "payment_terms", "products_listed",
+            "product_name", "manufacturer", "model", "unit",
+            "po_number", "order_date", "currency", "quantity",
+            "unit_price", "line_total", "status",
+        ]
+        result = result[display_columns].sort_values(
+            ["supplier_name", "product_name"], na_position="last"
+        )
+
+        if keyword2:
+            mask = (
+                result.astype(str)
+                .apply(
+                    lambda c: c.str.contains(
+                        keyword2, case=False, na=False, regex=False
+                    )
+                )
+                .any(axis=1)
+            )
+            result = result[mask]
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Suppliers", result["supplier_name"].nunique())
+        m2.metric("Products", result["product_name"].nunique())
+        m3.metric("Price records", int(result["unit_price"].notna().sum()))
+
+        st.write("Suppliers, products and prices")
+        st.dataframe(result, use_container_width=True, hide_index=True)
+
+        st.download_button(
+            "Download results (CSV)",
+            result.to_csv(index=False).encode("utf-8-sig"),
+            file_name="supplier_search.csv",
+            mime="text/csv",
+            key="search_csv_suppliers",
+        )
+
+        priced_rows = result.dropna(subset=["unit_price"]).copy()
+        if not priced_rows.empty:
+            priced_rows["unit_price"] = pd.to_numeric(
+                priced_rows["unit_price"], errors="coerce"
+            )
+            priced_rows = priced_rows.sort_values("order_date")
+
+            summary = (
+                priced_rows
+                .groupby(
+                    ["product_name", "supplier_name", "currency"],
+                    dropna=False,
+                )["unit_price"]
+                .agg(lowest="min", highest="max", latest="last", orders="count")
+                .reset_index()
+                .sort_values(["product_name", "lowest"])
+            )
+
+            st.write("Price summary (lowest, highest and latest per product)")
+            st.dataframe(summary, use_container_width=True, hide_index=True)
+
+
 
 
 # =========================================================
