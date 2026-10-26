@@ -397,6 +397,7 @@ def build_template(label, include_id=False):
         "product_id": "Use the product ID (see 'Products ref' sheet).",
         "purchase_order_id": "Use the PO ID (see 'PO ref' sheet).",
         "stock_classification": "Use exactly: " + ", ".join(STOCK_TYPES),
+        "category": "Choose from the dropdown (see the 'categories ref' tabs). Same spelling avoids duplicates.",
         "receipt_date": "Date format: YYYY-MM-DD",
         "order_date": "Date format: YYYY-MM-DD",
         "quantity": "Number, zero or more.",
