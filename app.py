@@ -49,8 +49,9 @@ TABLES = {
     "Suppliers": {
         "table": "suppliers",
         "columns": [
-            "id", "supplier_name", "country", "contact_person",
-            "email", "phone", "payment_terms", "notes",
+            "id", "supplier_name", "category", "products", "country",
+            "contact_person", "contact_title", "email", "phone",
+            "payment_terms", "notes",
         ],
         "required": ["supplier_name"],
         "key": "supplier_name",
@@ -67,6 +68,13 @@ TABLES = {
             "payment term": "payment_terms",
             "remarks": "notes",
             "comments": "notes",
+            "supplier category": "category",
+            "products supplied": "products",
+            "product list": "products",
+            "title": "contact_title",
+            "job title": "contact_title",
+            "contact title": "contact_title",
+            "position": "contact_title",
         },
     },
     "Projects": {
@@ -527,10 +535,11 @@ elif page == "Suppliers":
     add_basic_form(
         "suppliers",
         [
-            ("supplier_name", "text"), ("country", "text"),
-            ("contact_person", "text"), ("email", "text"),
-            ("phone", "text"), ("payment_terms", "text"),
-            ("notes", "textarea"),
+            ("supplier_name", "text"), ("category", "text"),
+            ("products", "textarea"), ("country", "text"),
+            ("contact_person", "text"), ("contact_title", "text"),
+            ("email", "text"), ("phone", "text"),
+            ("payment_terms", "text"), ("notes", "textarea"),
         ],
         "Add Supplier",
     )
