@@ -516,35 +516,133 @@ with st.sidebar:
 
 if page == "Dashboard":
     st.subheader("Overview")
-    metric_cols = st.columns(5)
 
-    for col, label, table in zip(
-        metric_cols,
-        ["Suppliers", "Projects", "Products", "Inventory", "Purchase Orders"],
-        ["suppliers", "projects", "products", "inventory", "purchase_orders"],
-    ):
+    dashboard_sections = [
+        ("Suppliers", "suppliers"),
+        ("Supplier Contacts", "supplier_contacts"),
+        ("Projects", "projects"),
+        ("Products", "products"),
+        ("Inventory", "inventory"),
+        ("Purchase Orders", "purchase_orders"),
+        ("Purchase Order Items", "purchase_order_items"),
+    ]
+
+    if "dashboard_section" not in st.session_state:
+        st.session_state["dashboard_section"] = "purchase_orders"
+
+    def count_rows(table_name):
         try:
-            col.metric(label, len(fetch_rows(table)))
+            result = (
+                supabase.table(table_name)
+                .select("id", count="exact")
+                .limit(1)
+                .execute()
+            )
+            if result.count is not None:
+                return result.count
+            return len(fetch_rows(table_name))
         except Exception:
-            col.metric(label, "Error")
+            return "Error"
 
-    st.subheader("Purchase Orders")
-    display_table("purchase_orders")
+    # Counters with a button under each one
+    for start in range(0, len(dashboard_sections), 4):
+        row_cols = st.columns(4)
+        for col, (label, table_name) in zip(
+            row_cols, dashboard_sections[start:start + 4]
+        ):
+            is_selected = st.session_state["dashboard_section"] == table_name
+            col.metric(label, count_rows(table_name))
+            if col.button(
+                "View records",
+                key=f"dash_btn_{table_name}",
+                type="primary" if is_selected else "secondary",
+                use_container_width=True,
+            ):
+                st.session_state["dashboard_section"] = table_name
+                st.rerun()
 
-
-elif page == "Suppliers":
-    add_basic_form(
-        "suppliers",
-        [
-            ("supplier_name", "text"), ("category", "text"),
-            ("products", "textarea"), ("country", "text"),
-            ("contact_person", "text"), ("contact_title", "text"),
-            ("email", "text"), ("phone", "text"),
-            ("payment_terms", "text"), ("notes", "textarea"),
-        ],
-        "Add Supplier",
+    # Records of the selected section, shown on the same page
+    selected_table = st.session_state["dashboard_section"]
+    selected_label = next(
+        (lbl for lbl, tbl in dashboard_sections if tbl == selected_table),
+        selected_table,
     )
-    display_table("suppliers")
+
+    st.divider()
+    st.subheader(selected_label)
+
+    try:
+        dash_rows = fetch_rows(selected_table)
+
+        if not dash_rows:
+            st.info("No records found.")
+        else:
+            dash_df = pd.DataFrame(dash_rows)
+
+            dash_keyword = st.text_input(
+                "Search in these records",
+                key=f"dash_search_{selected_table}",
+            )
+
+            if dash_keyword:
+                dash_mask = (
+                    dash_df.astype(str)
+                    .apply(
+                        lambda c: c.str.contains(
+                            dash_keyword, case=False, na=False, regex=False
+                        )
+                    )
+                    .any(axis=1)
+                )
+                dash_df = dash_df[dash_mask]
+
+            st.caption(f"{len(dash_df)} record(s)")
+            st.dataframe(dash_df, use_container_width=True, hide_index=True)
+
+            st.download_button(
+                "Download CSV",
+                dash_df.to_csv(index=False).encode("utf-8-sig"),
+                file_name=f"{selected_table}.csv",
+                mime="text/csv",
+                key=f"dash_csv_{selected_table}",
+            )
+    except Exception as exc:
+        st.error(f"Could not load {selected_label}: {exc}")
+
+
+
+
+# #if page == "Dashboard":
+#     st.subheader("Overview")
+#     metric_cols = st.columns(5)
+
+#     for col, label, table in zip(
+#         metric_cols,
+#         ["Suppliers", "Projects", "Products", "Inventory", "Purchase Orders"],
+#         ["suppliers", "projects", "products", "inventory", "purchase_orders"],
+#     ):
+#         try:
+#             col.metric(label, len(fetch_rows(table)))
+#         except Exception:
+#             col.metric(label, "Error")
+
+#     st.subheader("Purchase Orders")
+#     #display_table("purchase_orders")
+
+
+# elif page == "Suppliers":
+#     add_basic_form(
+#         "suppliers",
+#         [
+#             ("supplier_name", "text"), ("category", "text"),
+#             ("products", "textarea"), ("country", "text"),
+#             ("contact_person", "text"), ("contact_title", "text"),
+#             ("email", "text"), ("phone", "text"),
+#             ("payment_terms", "text"), ("notes", "textarea"),
+#         ],
+#         "Add Supplier",
+#     )
+#     display_table("suppliers")
 
 
 elif page == "Projects":
