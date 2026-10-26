@@ -437,6 +437,64 @@ def build_template(label, include_id=False):
                 ref_df = pd.DataFrame(columns=ref_columns)
             ref_df.to_excel(writer, sheet_name=sheet_name, index=False)
 
+
+
+        #Adding category reference
+                # Categories already used in the database (to avoid duplicates)
+        from openpyxl.worksheet.datavalidation import DataValidation
+
+        category_sheets = [
+            ("Supplier categories ref", "suppliers"),
+            ("Product categories ref", "products"),
+        ]
+        category_ranges = {}
+
+        for cat_sheet, source_table in category_sheets:
+            try:
+                source = pd.DataFrame(fetch_rows(source_table))
+                if "category" in source.columns:
+                    cats = source["category"].dropna().astype(str).str.strip()
+                    cats = cats[cats != ""]
+                    cat_df = (
+                        cats.value_counts()
+                        .rename_axis("category")
+                        .reset_index(name="records")
+                        .sort_values(
+                            "category", key=lambda s: s.str.lower()
+                        )
+                    )
+                else:
+                    cat_df = pd.DataFrame(columns=["category", "records"])
+            except Exception:
+                cat_df = pd.DataFrame(columns=["category", "records"])
+
+            cat_df.to_excel(writer, sheet_name=cat_sheet, index=False)
+            category_ranges[source_table] = (cat_sheet, len(cat_df))
+
+        # Dropdown on the 'category' column of the Template sheet
+        if "category" in columns and config["table"] in category_ranges:
+            ref_sheet, cat_count = category_ranges[config["table"]]
+            if cat_count > 0:
+                template_ws = writer.book["Template"]
+                cat_letter = template_ws.cell(
+                    row=1, column=columns.index("category") + 1
+                ).column_letter
+                dropdown = DataValidation(
+                    type="list",
+                    formula1=f"='{ref_sheet}'!$A$2:$A${cat_count + 1}",
+                    allow_blank=True,
+                    showErrorMessage=True,
+                    errorStyle="warning",
+                    errorTitle="New category",
+                    error=(
+                        "This category is not in the list. Use an existing "
+                        "category unless you really need a new one."
+                    ),
+                )
+                template_ws.add_data_validation(dropdown)
+                dropdown.add(f"{cat_letter}2:{cat_letter}1000")
+
+        
         # Light formatting: bold headers, required columns in yellow
         from openpyxl.styles import Font, PatternFill
 
