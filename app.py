@@ -519,7 +519,6 @@ if page == "Dashboard":
 
     dashboard_sections = [
         ("Suppliers", "suppliers"),
-        ("Supplier Contacts", "supplier_contacts"),
         ("Projects", "projects"),
         ("Products", "products"),
         ("Inventory", "inventory"),
