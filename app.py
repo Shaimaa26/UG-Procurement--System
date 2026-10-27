@@ -944,53 +944,170 @@ elif page == "Price List":
 
     st.divider()
 
-    price_rows = fetch_rows("product_prices")
-    if not price_rows:
-        st.info("No prices saved yet.")
+    # price_rows = fetch_rows("product_prices")
+    # if not price_rows:
+    #     st.info("No prices saved yet.")
+    #     st.stop()
+
+    # price_df = pd.DataFrame(price_rows)
+    # price_df.insert(
+    #     1, "product_name", price_df["product_id"].map(price_products)
+    # )
+    # price_df.insert(
+    #     3, "supplier_name", price_df["supplier_id"].map(price_suppliers)
+    # )
+
+    # view = st.radio(
+    #     "View",
+    #     ["Latest price per product and supplier", "All price records"],
+    #     horizontal=True,
+    # )
+
+    # if view == "Latest price per product and supplier":
+    #     price_df = (
+    #         price_df.sort_values(
+    #             ["price_date", "created_at"], na_position="first"
+    #         )
+    #         .drop_duplicates(
+    #             subset=["product_id", "supplier_id"], keep="last"
+    #         )
+    #         .sort_values(["product_name", "supplier_name"])
+    #     )
+
+    # p1, p2 = st.columns(2)
+
+    # chosen_products = p1.multiselect(
+    #     "Product", sorted(price_df["product_name"].dropna().unique())
+    # )
+    # chosen_suppliers = p2.multiselect(
+    #     "Supplier", sorted(price_df["supplier_name"].dropna().unique())
+    # )
+    # price_keyword = st.text_input("Search in prices")
+
+    # if chosen_products:
+    #     price_df = price_df[price_df["product_name"].isin(chosen_products)]
+    # if chosen_suppliers:
+    #     price_df = price_df[price_df["supplier_name"].isin(chosen_suppliers)]
+    # if price_keyword:
+    #     price_mask = (
+    #         price_df.astype(str)
+    #         .apply(
+    #             lambda c: c.str.contains(
+    #                 price_keyword, case=False, na=False, regex=False
+    #             )
+    #         )
+    #         .any(axis=1)
+    #     )
+    #     price_df = price_df[price_mask]
+
+    # q1, q2 = st.columns(2)
+    # q1.metric("Price records", len(price_df))
+    # q2.metric("Products with a price", price_df["product_id"].nunique())
+
+    # st.dataframe(price_df, use_container_width=True, hide_index=True)
+
+    # st.download_button(
+    #     "Download prices (CSV)",
+    #     price_df.to_csv(index=False).encode("utf-8-sig"),
+    #     file_name="product_prices.csv",
+    #     mime="text/csv",
+    #     key="csv_product_prices",
+    # )
+
+    products_df = pd.DataFrame(fetch_rows("products"))
+    prices_df = pd.DataFrame(fetch_rows("product_prices"))
+
+    if products_df.empty:
+        st.info("No products yet.")
         st.stop()
 
-    price_df = pd.DataFrame(price_rows)
-    price_df.insert(
-        1, "product_name", price_df["product_id"].map(price_products)
-    )
-    price_df.insert(
-        3, "supplier_name", price_df["supplier_id"].map(price_suppliers)
-    )
+    for col in ["id", "product_name", "category", "manufacturer",
+                "model", "unit"]:
+        if col not in products_df.columns:
+            products_df[col] = None
 
-    view = st.radio(
+    for col in ["product_id", "supplier_id", "unit_price", "currency",
+                "price_date", "quote_reference", "notes", "created_at"]:
+        if col not in prices_df.columns:
+            prices_df[col] = None
+
+    def price_key(series):
+        return series.map(
+            lambda v: None if pd.isna(v)
+            else str(int(v)) if isinstance(v, float) and v.is_integer()
+            else str(v)
+        )
+
+    v1, v2 = st.columns(2)
+    view = v1.radio(
         "View",
         ["Latest price per product and supplier", "All price records"],
         horizontal=True,
     )
+    include_no_price = v2.checkbox("Also show products without a price")
 
-    if view == "Latest price per product and supplier":
-        price_df = (
-            price_df.sort_values(
+    prices_df["supplier_name"] = prices_df["supplier_id"].map(price_suppliers)
+    prices_df["_pkey"] = price_key(prices_df["product_id"])
+    prices_df["_skey"] = price_key(prices_df["supplier_id"])
+
+    if view == "Latest price per product and supplier" and not prices_df.empty:
+        prices_df = (
+            prices_df.sort_values(
                 ["price_date", "created_at"], na_position="first"
             )
-            .drop_duplicates(
-                subset=["product_id", "supplier_id"], keep="last"
-            )
-            .sort_values(["product_name", "supplier_name"])
+            .drop_duplicates(subset=["_pkey", "_skey"], keep="last")
         )
 
-    p1, p2 = st.columns(2)
+    products_small = products_df[[
+        "id", "product_name", "category", "manufacturer", "model", "unit",
+    ]].copy()
+    products_small["_pkey"] = price_key(products_small["id"])
+    products_small = products_small.drop(columns=["id"])
 
-    chosen_products = p1.multiselect(
-        "Product", sorted(price_df["product_name"].dropna().unique())
+    price_view = prices_df.merge(
+        products_small,
+        on="_pkey",
+        how="right" if include_no_price else "inner",
     )
-    chosen_suppliers = p2.multiselect(
-        "Supplier", sorted(price_df["supplier_name"].dropna().unique())
+
+    show_columns = [
+        "product_name", "category", "manufacturer", "model", "unit",
+        "supplier_name", "unit_price", "currency", "price_date",
+        "quote_reference", "notes",
+    ]
+    price_view = price_view[show_columns].sort_values(
+        ["product_name", "supplier_name"], na_position="last"
+    )
+
+    if price_view.empty:
+        st.info("No prices saved yet.")
+        st.stop()
+
+    p1, p2, p3 = st.columns(3)
+    chosen_products = p1.multiselect(
+        "Product", sorted(price_view["product_name"].dropna().unique())
+    )
+    chosen_categories = p2.multiselect(
+        "Category", sorted(price_view["category"].dropna().astype(str).unique())
+    )
+    chosen_suppliers = p3.multiselect(
+        "Supplier", sorted(price_view["supplier_name"].dropna().unique())
     )
     price_keyword = st.text_input("Search in prices")
 
     if chosen_products:
-        price_df = price_df[price_df["product_name"].isin(chosen_products)]
+        price_view = price_view[price_view["product_name"].isin(chosen_products)]
+    if chosen_categories:
+        price_view = price_view[
+            price_view["category"].astype(str).isin(chosen_categories)
+        ]
     if chosen_suppliers:
-        price_df = price_df[price_df["supplier_name"].isin(chosen_suppliers)]
+        price_view = price_view[
+            price_view["supplier_name"].isin(chosen_suppliers)
+        ]
     if price_keyword:
         price_mask = (
-            price_df.astype(str)
+            price_view.astype(str)
             .apply(
                 lambda c: c.str.contains(
                     price_keyword, case=False, na=False, regex=False
@@ -998,17 +1115,19 @@ elif page == "Price List":
             )
             .any(axis=1)
         )
-        price_df = price_df[price_mask]
+        price_view = price_view[price_mask]
 
     q1, q2 = st.columns(2)
-    q1.metric("Price records", len(price_df))
-    q2.metric("Products with a price", price_df["product_id"].nunique())
+    q1.metric("Rows", len(price_view))
+    q2.metric("Products with a price", price_view.loc[
+        price_view["unit_price"].notna(), "product_name"
+    ].nunique())
 
-    st.dataframe(price_df, use_container_width=True, hide_index=True)
+    st.dataframe(price_view, use_container_width=True, hide_index=True)
 
     st.download_button(
         "Download prices (CSV)",
-        price_df.to_csv(index=False).encode("utf-8-sig"),
+        price_view.to_csv(index=False).encode("utf-8-sig"),
         file_name="product_prices.csv",
         mime="text/csv",
         key="csv_product_prices",
