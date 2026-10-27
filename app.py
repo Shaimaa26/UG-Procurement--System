@@ -309,6 +309,30 @@ def fetch_rows(table, limit=5000):
     return response.data or []
 
 
+# def clean_value(value):
+#     if value is None:
+#         return None
+#     try:
+#         if pd.isna(value):
+#             return None
+#     except (TypeError, ValueError):
+#         pass
+
+#     if isinstance(value, (pd.Timestamp, datetime, date)):
+#         return value.isoformat()
+
+#     if isinstance(value, str):
+#         value = value.strip()
+#         return value if value else None
+
+#     if hasattr(value, "item"):
+#         try:
+#             return value.item()
+#         except Exception:
+#             pass
+
+#     return value
+
 def clean_value(value):
     if value is None:
         return None
@@ -327,12 +351,15 @@ def clean_value(value):
 
     if hasattr(value, "item"):
         try:
-            return value.item()
+            value = value.item()
         except Exception:
             pass
 
-    return value
+    # Whole numbers read as decimals from Excel (4.0) become integers (4)
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
 
+    return value
 
 def clean_record(record):
     result = {}
