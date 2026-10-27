@@ -176,6 +176,38 @@ TABLES = {
             "comments": "notes",
         },
     },
+
+    #add product prices:
+    
+        "Product Prices": {
+        "table": "product_prices",
+        "columns": [
+            "id", "product_name", "product_id", "supplier_name",
+            "supplier_id", "unit_price", "currency", "price_date",
+            "quote_reference", "notes",
+        ],
+        "required": ["product_id", "unit_price"],
+        "key": "id",
+        "aliases": {
+            "product": "product_name",
+            "product name": "product_name",
+            "item": "product_name",
+            "supplier": "supplier_name",
+            "supplier name": "supplier_name",
+            "vendor": "supplier_name",
+            "price": "unit_price",
+            "unit cost": "unit_price",
+            "cost": "unit_price",
+            "date": "price_date",
+            "quote date": "price_date",
+            "quote": "quote_reference",
+            "quotation": "quote_reference",
+            "quote no": "quote_reference",
+            "remarks": "notes",
+            "comments": "notes",
+        },
+    },
+ #add product prices.
     
     "Inventory": {
         "table": "inventory",
@@ -454,6 +486,9 @@ def build_template(label, include_id=False):
         "unit_price": "Number, zero or more.",
         "product_name": "Type the exact product name (or use product_id from the 'Products ref' sheet).",
         "accessory_type": "For example: Mounting bracket, Cable, Enclosure.",
+        "supplier_name": "Type the exact supplier name saved in Suppliers.",
+        "currency": "For example: USD, EUR, EGP. Use the same spelling every time.",
+        "price_date": "Date of the quote or price list: YYYY-MM-DD",
     }
 
     instructions = pd.DataFrame({
@@ -609,6 +644,7 @@ with st.sidebar:
             "Projects",
             "Products",
             "Accessories",
+            "Price List",
             "Inventory",
             "Purchase Orders",
             "Purchase Order Items",
@@ -882,6 +918,104 @@ elif page == "Accessories":
 
 
 #added with product accessories.
+
+#Add product price:
+elif page == "Price List":
+    st.subheader("Product Price List")
+
+    price_products = {
+        row["id"]: str(row.get("product_name") or row["id"])
+        for row in fetch_rows("products")
+        if row.get("id") is not None
+    }
+    price_suppliers = get_choices("suppliers", "supplier_name")
+
+    with st.expander("Add a price"):
+        add_basic_form(
+            "product_prices",
+            [
+                ("product_id", "product"), ("supplier_id", "supplier"),
+                ("unit_price", "number"), ("currency", "text"),
+                ("price_date", "date"), ("quote_reference", "text"),
+                ("notes", "textarea"),
+            ],
+            "Add Price",
+        )
+
+    st.divider()
+
+    price_rows = fetch_rows("product_prices")
+    if not price_rows:
+        st.info("No prices saved yet.")
+        st.stop()
+
+    price_df = pd.DataFrame(price_rows)
+    price_df.insert(
+        1, "product_name", price_df["product_id"].map(price_products)
+    )
+    price_df.insert(
+        3, "supplier_name", price_df["supplier_id"].map(price_suppliers)
+    )
+
+    view = st.radio(
+        "View",
+        ["Latest price per product and supplier", "All price records"],
+        horizontal=True,
+    )
+
+    if view == "Latest price per product and supplier":
+        price_df = (
+            price_df.sort_values(
+                ["price_date", "created_at"], na_position="first"
+            )
+            .drop_duplicates(
+                subset=["product_id", "supplier_id"], keep="last"
+            )
+            .sort_values(["product_name", "supplier_name"])
+        )
+
+    p1, p2 = st.columns(2)
+
+    chosen_products = p1.multiselect(
+        "Product", sorted(price_df["product_name"].dropna().unique())
+    )
+    chosen_suppliers = p2.multiselect(
+        "Supplier", sorted(price_df["supplier_name"].dropna().unique())
+    )
+    price_keyword = st.text_input("Search in prices")
+
+    if chosen_products:
+        price_df = price_df[price_df["product_name"].isin(chosen_products)]
+    if chosen_suppliers:
+        price_df = price_df[price_df["supplier_name"].isin(chosen_suppliers)]
+    if price_keyword:
+        price_mask = (
+            price_df.astype(str)
+            .apply(
+                lambda c: c.str.contains(
+                    price_keyword, case=False, na=False, regex=False
+                )
+            )
+            .any(axis=1)
+        )
+        price_df = price_df[price_mask]
+
+    q1, q2 = st.columns(2)
+    q1.metric("Price records", len(price_df))
+    q2.metric("Products with a price", price_df["product_id"].nunique())
+
+    st.dataframe(price_df, use_container_width=True, hide_index=True)
+
+    st.download_button(
+        "Download prices (CSV)",
+        price_df.to_csv(index=False).encode("utf-8-sig"),
+        file_name="product_prices.csv",
+        mime="text/csv",
+        key="csv_product_prices",
+    )
+
+#Add product price.
+
 
 elif page == "Inventory":
     add_basic_form(
@@ -1363,6 +1497,22 @@ elif page == "Excel Import":
 
             records = []
             validation_errors = []
+
+# Add product price:
+            price_product_ids = {}
+            price_supplier_ids = {}
+            if table == "product_prices":
+                for pid, pname in get_choices(
+                    "products", "product_name"
+                ).items():
+                    price_product_ids.setdefault(
+                        str(pname).strip().lower(), []
+                    ).append(pid)
+                for sid, sname in get_choices(
+                    "suppliers", "supplier_name"
+                ).items():
+                    price_supplier_ids[str(sname).strip().lower()] = sid
+# Add product price.
             
 #added with product accessories:
             product_ids_by_name = {}
@@ -1380,6 +1530,40 @@ elif page == "Excel Import":
                 record = clean_record(row.to_dict())
                 row_errors = []
 
+ #Add product price:               
+                if table == "product_prices":
+                    price_product_name = record.pop("product_name", None)
+                    price_supplier_name = record.pop("supplier_name", None)
+
+                    if record.get("product_id") is None and price_product_name:
+                        matches = price_product_ids.get(
+                            str(price_product_name).strip().lower(), []
+                        )
+                        if len(matches) == 1:
+                            record["product_id"] = matches[0]
+                        elif not matches:
+                            row_errors.append(
+                                f"Product not found: {price_product_name}"
+                            )
+                        else:
+                            row_errors.append(
+                                f"Several products named {price_product_name}; "
+                                "use product_id instead"
+                            )
+
+                    if record.get("supplier_id") is None and price_supplier_name:
+                        found_supplier = price_supplier_ids.get(
+                            str(price_supplier_name).strip().lower()
+                        )
+                        if found_supplier is None:
+                            row_errors.append(
+                                f"Supplier not found: {price_supplier_name}"
+                            )
+                        else:
+                            record["supplier_id"] = found_supplier
+
+#Add product price.
+                
                 
 #added with product accessories:
                 if table == "product_accessories":
