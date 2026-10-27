@@ -143,6 +143,40 @@ TABLES = {
             "comments": "notes",
         },
     },
+    
+    "Product Accessories": {
+        "table": "product_accessories",
+        "columns": [
+            "id", "product_name", "product_id", "accessory_name",
+            "accessory_type", "manufacturer", "model", "quantity", "unit",
+            "supplier_id", "unit_price", "notes",
+        ],
+        "required": ["accessory_name"],
+        "key": "id",
+        "aliases": {
+            "product": "product_name",
+            "product name": "product_name",
+            "main product": "product_name",
+            "accessory": "accessory_name",
+            "accessory name": "accessory_name",
+            "item": "accessory_name",
+            "description": "accessory_name",
+            "type": "accessory_type",
+            "category": "accessory_type",
+            "accessory category": "accessory_type",
+            "brand": "manufacturer",
+            "make": "manufacturer",
+            "part number": "model",
+            "qty": "quantity",
+            "uom": "unit",
+            "supplier": "supplier_id",
+            "price": "unit_price",
+            "unit cost": "unit_price",
+            "remarks": "notes",
+            "comments": "notes",
+        },
+    },
+    
     "Inventory": {
         "table": "inventory",
         "columns": [
@@ -418,6 +452,8 @@ def build_template(label, include_id=False):
         "order_date": "Date format: YYYY-MM-DD",
         "quantity": "Number, zero or more.",
         "unit_price": "Number, zero or more.",
+        "product_name": "Type the exact product name (or use product_id from the 'Products ref' sheet).",
+        "accessory_type": "For example: Mounting bracket, Cable, Enclosure.",
     }
 
     instructions = pd.DataFrame({
@@ -572,6 +608,7 @@ with st.sidebar:
             "Suppliers",
             "Projects",
             "Products",
+            "Accessories",
             "Inventory",
             "Purchase Orders",
             "Purchase Order Items",
@@ -745,6 +782,106 @@ elif page == "Products":
     )
     display_table("products")
 
+
+#added with product accessories:
+
+elif page == "Accessories":
+    st.subheader("Product Accessories")
+
+    acc_products = {
+        row["id"]: str(row.get("product_name") or row["id"])
+        for row in fetch_rows("products")
+        if row.get("id") is not None
+    }
+
+    with st.expander("Add a new accessory"):
+        add_basic_form(
+            "product_accessories",
+            [
+                ("product_id", "product"), ("accessory_name", "text"),
+                ("accessory_type", "text"), ("manufacturer", "text"),
+                ("model", "text"), ("quantity", "number"),
+                ("unit", "text"), ("supplier_id", "supplier"),
+                ("unit_price", "number"), ("notes", "textarea"),
+            ],
+            "Add Accessory",
+        )
+
+    st.divider()
+
+    scope = st.radio(
+        "Show accessories for",
+        ["One product", "All products"],
+        horizontal=True,
+    )
+
+    selected_product = None
+    if scope == "One product":
+        selected_product = st.selectbox(
+            "Product",
+            [None] + list(acc_products.keys()),
+            format_func=lambda x: (
+                "-- Select a product --" if x is None else acc_products[x]
+            ),
+        )
+        if selected_product is None:
+            st.info("Select a product to see its accessories.")
+            st.stop()
+
+    acc_rows = fetch_rows("product_accessories")
+    if not acc_rows:
+        st.info("No accessories saved yet.")
+        st.stop()
+
+    acc_df = pd.DataFrame(acc_rows)
+
+    if selected_product is not None:
+        acc_df = acc_df[acc_df["product_id"] == selected_product]
+
+    acc_df.insert(
+        1, "product_name", acc_df["product_id"].map(acc_products)
+    )
+
+    f1, f2 = st.columns(2)
+
+    type_values = sorted(
+        acc_df["accessory_type"].dropna().astype(str).unique()
+    ) if "accessory_type" in acc_df.columns else []
+
+    chosen_types = f1.multiselect("Accessory type", type_values)
+    acc_keyword = f2.text_input("Search in accessories")
+
+    if chosen_types:
+        acc_df = acc_df[acc_df["accessory_type"].astype(str).isin(chosen_types)]
+
+    if acc_keyword:
+        acc_mask = (
+            acc_df.astype(str)
+            .apply(
+                lambda c: c.str.contains(
+                    acc_keyword, case=False, na=False, regex=False
+                )
+            )
+            .any(axis=1)
+        )
+        acc_df = acc_df[acc_mask]
+
+    m1, m2 = st.columns(2)
+    m1.metric("Accessories", len(acc_df))
+    m2.metric("Products covered", acc_df["product_id"].nunique())
+
+    st.dataframe(acc_df, use_container_width=True, hide_index=True)
+
+    st.download_button(
+        "Download accessories (CSV)",
+        acc_df.to_csv(index=False).encode("utf-8-sig"),
+        file_name="product_accessories.csv",
+        mime="text/csv",
+        key="csv_accessories",
+    )
+
+
+#added with product accessories.
 
 elif page == "Inventory":
     add_basic_form(
@@ -1226,10 +1363,46 @@ elif page == "Excel Import":
 
             records = []
             validation_errors = []
-
+            
+#added with product accessories:
+            product_ids_by_name = {}
+            if table == "product_accessories":
+                for pid, pname in get_choices(
+                    "products", "product_name"
+                ).items():
+                    product_ids_by_name.setdefault(
+                        str(pname).strip().lower(), []
+                    ).append(pid)
+#added with product accessories.
+            
+            
             for row_index, (_, row) in enumerate(mapped.iterrows(), start=2):
                 record = clean_record(row.to_dict())
                 row_errors = []
+
+                
+#added with product accessories:
+                    if table == "product_accessories":
+                    product_name_value = record.pop("product_name", None)
+                    if record.get("product_id") is None and product_name_value:
+                        matches = product_ids_by_name.get(
+                            str(product_name_value).strip().lower(), []
+                        )
+                        if len(matches) == 1:
+                            record["product_id"] = matches[0]
+                        elif not matches:
+                            row_errors.append(
+                                f"Product not found: {product_name_value}"
+                            )
+                        else:
+                            row_errors.append(
+                                f"Several products named {product_name_value}; "
+                                "use product_id instead"
+                            )
+                    if record.get("product_id") is None and not product_name_value:
+                        row_errors.append(
+                            "Missing product_name or product_id"
+                        )
 
                 for field in config["required"]:
                     if record.get(field) is None:
@@ -1245,7 +1418,9 @@ elif page == "Excel Import":
                             "Invalid stock_classification. Use: "
                             + ", ".join(STOCK_TYPES)
                         )
+#added with product accessories.
 
+                
                 for number_field in ("quantity", "unit_price"):
                     if record.get(number_field) is not None:
                         try:
