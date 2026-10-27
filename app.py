@@ -6,20 +6,31 @@ from decimal import Decimal, InvalidOperation
 import pandas as pd
 import streamlit as st
 from supabase import create_client
+from pathlib import Path
 
-
+LOGO_PATH = Path(__file__).parent / "logo.png"
 # =========================================================
 # PAGE CONFIG
 # =========================================================
 
+# st.set_page_config(
+#     page_title="United Group Procurement",
+#     page_icon="📊",
+#     layout="wide",
+# )
+
+# st.title("United Group | Procurement System")
+
 st.set_page_config(
     page_title="United Group Procurement",
-    page_icon="📊",
+    page_icon=str(LOGO_PATH) if LOGO_PATH.exists() else "📊",
     layout="wide",
 )
 
-st.title("United Group | Procurement System")
+if LOGO_PATH.exists():
+    st.logo(str(LOGO_PATH), size="large")
 
+st.title("United Group | Procurement System")
 
 # =========================================================
 # SUPABASE
