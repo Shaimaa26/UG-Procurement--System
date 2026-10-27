@@ -1382,7 +1382,7 @@ elif page == "Excel Import":
 
                 
 #added with product accessories:
-                    if table == "product_accessories":
+                if table == "product_accessories":
                     product_name_value = record.pop("product_name", None)
                     if record.get("product_id") is None and product_name_value:
                         matches = product_ids_by_name.get(
