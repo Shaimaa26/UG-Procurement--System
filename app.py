@@ -30,7 +30,12 @@ st.set_page_config(
 if LOGO_PATH.exists():
     st.logo(str(LOGO_PATH), size="large")
 
-st.title("United Group | Procurement System")
+header_logo, header_title = st.columns([1, 6])
+with header_logo:
+    if LOGO_PATH.exists():
+        st.image(str(LOGO_PATH), width=110)
+with header_title:
+    st.title("United Group | Procurement System")
 
 # =========================================================
 # SUPABASE
