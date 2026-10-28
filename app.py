@@ -1901,7 +1901,221 @@ elif page == "Price List":
                 st.error(f"Import error: {exc}")
 # import combined files once.
     
-# updated to import one time in one file for products and accessories    
+# updated to import one time in one file for products and accessories
+
+# add button to shown products with accessories on system:
+
+    with st.expander("View products with their accessories"):
+        vw_products = pd.DataFrame(fetch_rows("products"))
+        vw_acc = pd.DataFrame(fetch_rows("product_accessories"))
+        vw_prices = pd.DataFrame(fetch_rows("product_prices"))
+
+        def vw_key(v):
+            if v is None:
+                return None
+            try:
+                if pd.isna(v):
+                    return None
+            except (TypeError, ValueError):
+                pass
+            if isinstance(v, float) and v.is_integer():
+                return str(int(v))
+            return str(v)
+
+        vw_sup = {
+            str(k): v
+            for k, v in get_choices("suppliers", "supplier_name").items()
+        }
+
+        if vw_products.empty:
+            st.info("No products yet.")
+        else:
+            for col in ["id", "product_name", "category", "manufacturer",
+                        "model", "unit"]:
+                if col not in vw_products.columns:
+                    vw_products[col] = None
+            for col in ["product_id", "accessory_name", "accessory_type",
+                        "manufacturer", "model", "quantity", "unit",
+                        "unit_price", "supplier_id"]:
+                if col not in vw_acc.columns:
+                    vw_acc[col] = None
+            for col in ["product_id", "supplier_id", "unit_price", "currency",
+                        "price_date", "created_at"]:
+                if col not in vw_prices.columns:
+                    vw_prices[col] = None
+
+            w1, w2 = st.columns(2)
+            vw_basis = w1.radio(
+                "Device price",
+                ["Latest price", "Lowest price"],
+                horizontal=True,
+                key="vw_basis",
+            )
+            vw_only_acc = w2.checkbox(
+                "Only products that have accessories",
+                value=True,
+                key="vw_only_acc",
+            )
+
+            w3, w4 = st.columns(2)
+            vw_selected = w3.multiselect(
+                "Products (leave empty for all)",
+                sorted(vw_products["product_name"].dropna().astype(str).unique()),
+                key="vw_selected",
+            )
+            vw_types = w4.multiselect(
+                "Accessory type (leave empty for all)",
+                sorted(vw_acc["accessory_type"].dropna().astype(str).unique()),
+                key="vw_types",
+            )
+
+            vw_products["_k"] = vw_products["id"].map(vw_key)
+            vw_acc["_k"] = vw_acc["product_id"].map(vw_key)
+            vw_prices["_k"] = vw_prices["product_id"].map(vw_key)
+
+            if vw_types:
+                vw_acc = vw_acc[
+                    vw_acc["accessory_type"].astype(str).isin(vw_types)
+                ]
+
+            vw_prices["unit_price"] = pd.to_numeric(
+                vw_prices["unit_price"], errors="coerce"
+            )
+            vw_prices = vw_prices.dropna(subset=["unit_price"]).copy()
+            vw_prices["supplier_name"] = vw_prices["supplier_id"].map(
+                lambda v: vw_sup.get(vw_key(v))
+            )
+
+            if vw_prices.empty:
+                vw_best = pd.DataFrame(columns=[
+                    "_k", "device_price", "currency", "device_supplier",
+                ])
+            else:
+                if vw_basis == "Latest price":
+                    vw_best = vw_prices.sort_values(
+                        ["price_date", "created_at"], na_position="first"
+                    ).drop_duplicates("_k", keep="last")
+                else:
+                    vw_best = vw_prices.sort_values(
+                        "unit_price"
+                    ).drop_duplicates("_k", keep="first")
+                vw_best = vw_best[
+                    ["_k", "unit_price", "currency", "supplier_name"]
+                ].rename(columns={
+                    "unit_price": "device_price",
+                    "supplier_name": "device_supplier",
+                })
+
+            vw_devices = vw_products.merge(vw_best, on="_k", how="left")
+
+            if vw_selected:
+                vw_devices = vw_devices[
+                    vw_devices["product_name"].astype(str).isin(vw_selected)
+                ]
+            if vw_only_acc:
+                vw_devices = vw_devices[
+                    vw_devices["_k"].isin(set(vw_acc["_k"].dropna()))
+                ]
+
+            if vw_devices.empty:
+                st.info("No products match these options.")
+            else:
+                vw_detail = []
+                vw_summary = []
+
+                for _, dev in vw_devices.sort_values(
+                    "product_name", na_position="last"
+                ).iterrows():
+                    dev_price = dev.get("device_price")
+                    dev_has_price = pd.notna(dev_price)
+                    dev_currency = dev.get("currency")
+
+                    vw_detail.append({
+                        "device": dev["product_name"],
+                        "item_type": "Device",
+                        "item_name": dev["product_name"],
+                        "accessory_type": None,
+                        "manufacturer": dev["manufacturer"],
+                        "model": dev["model"],
+                        "quantity": 1,
+                        "unit": dev["unit"],
+                        "unit_price": dev_price if dev_has_price else None,
+                        "currency": dev_currency,
+                        "line_total": dev_price if dev_has_price else None,
+                        "price_supplier": dev.get("device_supplier"),
+                    })
+
+                    acc_total = 0.0
+                    acc_count = 0
+                    unpriced = 0 if dev_has_price else 1
+
+                    for _, acc in vw_acc[vw_acc["_k"] == dev["_k"]].iterrows():
+                        qty = pd.to_numeric(acc["quantity"], errors="coerce")
+                        price = pd.to_numeric(acc["unit_price"], errors="coerce")
+                        qty_used = 1 if pd.isna(qty) else qty
+
+                        if pd.notna(price):
+                            line_total = qty_used * price
+                            acc_total += line_total
+                        else:
+                            line_total = None
+                            unpriced += 1
+
+                        acc_count += 1
+                        vw_detail.append({
+                            "device": dev["product_name"],
+                            "item_type": "Accessory",
+                            "item_name": acc["accessory_name"],
+                            "accessory_type": acc["accessory_type"],
+                            "manufacturer": acc["manufacturer"],
+                            "model": acc["model"],
+                            "quantity": None if pd.isna(qty) else qty,
+                            "unit": acc["unit"],
+                            "unit_price": None if pd.isna(price) else price,
+                            "currency": dev_currency,
+                            "line_total": line_total,
+                            "price_supplier": vw_sup.get(
+                                vw_key(acc["supplier_id"])
+                            ),
+                        })
+
+                    vw_summary.append({
+                        "device": dev["product_name"],
+                        "category": dev["category"],
+                        "device_price": dev_price if dev_has_price else None,
+                        "accessories_count": acc_count,
+                        "accessories_total": acc_total if acc_count else None,
+                        "complete_total": (
+                            (dev_price if dev_has_price else 0) + acc_total
+                        ),
+                        "currency": dev_currency,
+                        "items_without_price": unpriced,
+                    })
+
+                vw_detail_df = pd.DataFrame(vw_detail)
+                vw_summary_df = pd.DataFrame(vw_summary)
+
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Devices", len(vw_summary_df))
+                m2.metric(
+                    "Accessory lines", len(vw_detail_df) - len(vw_summary_df)
+                )
+                m3.metric(
+                    "Items without price",
+                    int(vw_summary_df["items_without_price"].sum()),
+                )
+
+                st.write("Summary per device")
+                st.dataframe(
+                    vw_summary_df, use_container_width=True, hide_index=True
+                )
+
+                st.write("Devices with their accessories")
+                st.dataframe(
+                    vw_detail_df, use_container_width=True, hide_index=True
+                )
+
+# add button to shown products with accessories on system.
     
     st.divider()
 
