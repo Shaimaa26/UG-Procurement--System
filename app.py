@@ -970,6 +970,332 @@ elif page == "Price List":
         )
 # add button to just complete price for exisitng products
     with st.expander("Download price template for existing products"):
+
+# adding accessories with products in 1 file of pricing
+    with st.expander("Download accessories price template"):
+        at_scope = st.radio(
+            "Accessories to include",
+            ["Only accessories without a price", "All accessories"],
+            horizontal=True,
+            key="acc_price_scope",
+        )
+
+        at_acc = pd.DataFrame(fetch_rows("product_accessories"))
+
+        def at_key(v):
+            if pd.isna(v):
+                return None
+            if isinstance(v, float) and v.is_integer():
+                return str(int(v))
+            return str(v)
+
+        at_products = {
+            str(row["id"]): str(row.get("product_name") or row["id"])
+            for row in fetch_rows("products")
+            if row.get("id") is not None
+        }
+
+        if at_acc.empty:
+            st.info("No accessories yet. Add them on the Accessories page first.")
+        else:
+            for col in ["id", "product_id", "accessory_name", "accessory_type",
+                        "manufacturer", "model", "quantity", "unit",
+                        "unit_price"]:
+                if col not in at_acc.columns:
+                    at_acc[col] = None
+
+            if at_scope == "Only accessories without a price":
+                at_acc = at_acc[
+                    pd.to_numeric(at_acc["unit_price"], errors="coerce").isna()
+                ]
+
+            if at_acc.empty:
+                st.info("All accessories already have a price.")
+            else:
+                at_df = pd.DataFrame({
+                    "id": at_acc["id"],
+                    "device": at_acc["product_id"].map(
+                        lambda v: at_products.get(at_key(v))
+                    ),
+                    "accessory_type": at_acc["accessory_type"],
+                    "accessory_name": at_acc["accessory_name"],
+                    "manufacturer": at_acc["manufacturer"],
+                    "model": at_acc["model"],
+                    "quantity": at_acc["quantity"],
+                    "unit": at_acc["unit"],
+                    "unit_price": None,
+                }).sort_values(
+                    ["device", "accessory_type"], na_position="last"
+                )
+
+                at_buffer = io.BytesIO()
+                with pd.ExcelWriter(at_buffer, engine="openpyxl") as writer:
+                    at_df.to_excel(writer, sheet_name="Template", index=False)
+
+                    from openpyxl.styles import Font, PatternFill
+
+                    ws = writer.book["Template"]
+                    for cell in ws[1]:
+                        cell.font = Font(bold=True)
+                        if cell.value == "unit_price":
+                            cell.fill = PatternFill("solid", fgColor="FFF2CC")
+                    for column_cells in ws.columns:
+                        width = max(
+                            len(str(c.value)) if c.value is not None else 0
+                            for c in column_cells
+                        )
+                        ws.column_dimensions[
+                            column_cells[0].column_letter
+                        ].width = min(max(width + 2, 12), 45)
+
+                st.caption(f"{len(at_df)} accessory line(s) in the file")
+                st.download_button(
+                    "Download accessories price template (Excel)",
+                    at_buffer.getvalue(),
+                    file_name="accessories_prices_to_complete.xlsx",
+                    mime=(
+                        "application/vnd.openxmlformats-officedocument."
+                        "spreadsheetml.sheet"
+                    ),
+                    key="acc_price_download",
+                )
+                st.caption(
+                    "Fill unit_price only. Keep the id column. To import: "
+                    "Excel Import, destination Product Accessories, mode "
+                    "Update existing, match by id."
+                )
+
+
+###################################################################
+    
+    with st.expander("Download complete devices (product + accessories + prices)"):
+        cd_products = pd.DataFrame(fetch_rows("products"))
+        cd_acc = pd.DataFrame(fetch_rows("product_accessories"))
+        cd_prices = pd.DataFrame(fetch_rows("product_prices"))
+
+        def cd_key(v):
+            if pd.isna(v):
+                return None
+            if isinstance(v, float) and v.is_integer():
+                return str(int(v))
+            return str(v)
+
+        cd_suppliers = {
+            str(k): v
+            for k, v in get_choices("suppliers", "supplier_name").items()
+        }
+
+        if cd_products.empty:
+            st.info("No products yet.")
+        else:
+            for col in ["id", "product_name", "category", "manufacturer",
+                        "model", "unit"]:
+                if col not in cd_products.columns:
+                    cd_products[col] = None
+            for col in ["product_id", "accessory_name", "accessory_type",
+                        "manufacturer", "model", "quantity", "unit",
+                        "unit_price", "supplier_id"]:
+                if col not in cd_acc.columns:
+                    cd_acc[col] = None
+            for col in ["product_id", "supplier_id", "unit_price", "currency",
+                        "price_date", "created_at"]:
+                if col not in cd_prices.columns:
+                    cd_prices[col] = None
+
+            o1, o2 = st.columns(2)
+            price_basis = o1.radio(
+                "Device price",
+                ["Latest price", "Lowest price"],
+                horizontal=True,
+                key="cd_basis",
+            )
+            only_with_acc = o2.checkbox(
+                "Only products that have accessories",
+                value=True,
+                key="cd_only",
+            )
+            cd_selected = st.multiselect(
+                "Products (leave empty for all)",
+                sorted(cd_products["product_name"].dropna().astype(str).unique()),
+                key="cd_selected",
+            )
+
+            cd_products["_k"] = cd_products["id"].map(cd_key)
+            cd_acc["_k"] = cd_acc["product_id"].map(cd_key)
+            cd_prices["_k"] = cd_prices["product_id"].map(cd_key)
+
+            cd_prices["unit_price"] = pd.to_numeric(
+                cd_prices["unit_price"], errors="coerce"
+            )
+            cd_prices = cd_prices.dropna(subset=["unit_price"]).copy()
+            cd_prices["supplier_name"] = cd_prices["supplier_id"].map(
+                lambda v: cd_suppliers.get(cd_key(v))
+            )
+
+            if cd_prices.empty:
+                best = pd.DataFrame(columns=[
+                    "_k", "device_price", "currency", "device_supplier",
+                ])
+            else:
+                if price_basis == "Latest price":
+                    best = (
+                        cd_prices.sort_values(
+                            ["price_date", "created_at"], na_position="first"
+                        ).drop_duplicates("_k", keep="last")
+                    )
+                else:
+                    best = (
+                        cd_prices.sort_values("unit_price")
+                        .drop_duplicates("_k", keep="first")
+                    )
+                best = best[
+                    ["_k", "unit_price", "currency", "supplier_name"]
+                ].rename(columns={
+                    "unit_price": "device_price",
+                    "supplier_name": "device_supplier",
+                })
+
+            devices = cd_products.merge(best, on="_k", how="left")
+
+            if cd_selected:
+                devices = devices[
+                    devices["product_name"].astype(str).isin(cd_selected)
+                ]
+            if only_with_acc:
+                devices = devices[devices["_k"].isin(set(cd_acc["_k"].dropna()))]
+
+            if devices.empty:
+                st.info("No products match these options.")
+            else:
+                detail_rows = []
+                summary_rows = []
+
+                for _, dev in devices.sort_values(
+                    "product_name", na_position="last"
+                ).iterrows():
+                    dev_price = dev.get("device_price")
+                    dev_currency = dev.get("currency")
+                    dev_has_price = pd.notna(dev_price)
+
+                    detail_rows.append({
+                        "device": dev["product_name"],
+                        "item_type": "Device",
+                        "item_name": dev["product_name"],
+                        "accessory_type": None,
+                        "manufacturer": dev["manufacturer"],
+                        "model": dev["model"],
+                        "quantity": 1,
+                        "unit": dev["unit"],
+                        "unit_price": dev_price if dev_has_price else None,
+                        "currency": dev_currency,
+                        "line_total": dev_price if dev_has_price else None,
+                        "price_supplier": dev.get("device_supplier"),
+                    })
+
+                    acc_total = 0.0
+                    acc_count = 0
+                    unpriced = 0 if dev_has_price else 1
+
+                    for _, acc in cd_acc[cd_acc["_k"] == dev["_k"]].iterrows():
+                        qty = pd.to_numeric(acc["quantity"], errors="coerce")
+                        price = pd.to_numeric(acc["unit_price"], errors="coerce")
+                        qty_for_total = 1 if pd.isna(qty) else qty
+
+                        if pd.notna(price):
+                            line_total = qty_for_total * price
+                            acc_total += line_total
+                        else:
+                            line_total = None
+                            unpriced += 1
+
+                        acc_count += 1
+                        detail_rows.append({
+                            "device": dev["product_name"],
+                            "item_type": "Accessory",
+                            "item_name": acc["accessory_name"],
+                            "accessory_type": acc["accessory_type"],
+                            "manufacturer": acc["manufacturer"],
+                            "model": acc["model"],
+                            "quantity": None if pd.isna(qty) else qty,
+                            "unit": acc["unit"],
+                            "unit_price": None if pd.isna(price) else price,
+                            "currency": dev_currency,
+                            "line_total": line_total,
+                            "price_supplier": cd_suppliers.get(
+                                cd_key(acc["supplier_id"])
+                            ),
+                        })
+
+                    summary_rows.append({
+                        "device": dev["product_name"],
+                        "category": dev["category"],
+                        "manufacturer": dev["manufacturer"],
+                        "model": dev["model"],
+                        "price_supplier": dev.get("device_supplier"),
+                        "device_price": dev_price if dev_has_price else None,
+                        "accessories_count": acc_count,
+                        "accessories_total": acc_total if acc_count else None,
+                        "complete_total": (
+                            (dev_price if dev_has_price else 0) + acc_total
+                        ),
+                        "currency": dev_currency,
+                        "items_without_price": unpriced,
+                    })
+
+                detail_df = pd.DataFrame(detail_rows)
+                summary_df = pd.DataFrame(summary_rows)
+
+                cd_buffer = io.BytesIO()
+                with pd.ExcelWriter(cd_buffer, engine="openpyxl") as writer:
+                    detail_df.to_excel(
+                        writer, sheet_name="Complete devices", index=False
+                    )
+                    summary_df.to_excel(
+                        writer, sheet_name="Summary", index=False
+                    )
+
+                    from openpyxl.styles import Font, PatternFill
+
+                    device_fill = PatternFill("solid", fgColor="E7F0FA")
+
+                    for ws in writer.book.worksheets:
+                        for cell in ws[1]:
+                            cell.font = Font(bold=True)
+                        for column_cells in ws.columns:
+                            width = max(
+                                len(str(c.value)) if c.value is not None else 0
+                                for c in column_cells
+                            )
+                            ws.column_dimensions[
+                                column_cells[0].column_letter
+                            ].width = min(max(width + 2, 12), 45)
+
+                    ws_detail = writer.book["Complete devices"]
+                    for row in ws_detail.iter_rows(min_row=2):
+                        if row[1].value == "Device":
+                            for cell in row:
+                                cell.fill = device_fill
+                                cell.font = Font(bold=True)
+
+                st.caption(
+                    f"{len(summary_df)} device(s), "
+                    f"{len(detail_df) - len(summary_df)} accessory line(s)"
+                )
+                st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+                st.download_button(
+                    "Download complete devices (Excel)",
+                    cd_buffer.getvalue(),
+                    file_name="complete_devices_with_accessories.xlsx",
+                    mime=(
+                        "application/vnd.openxmlformats-officedocument."
+                        "spreadsheetml.sheet"
+                    ),
+                    key="cd_download",
+                )
+        
+
+# adding accessories with products in 1 file of pricing        
         template_scope = st.radio(
             "Products to include",
             ["Only products without a price", "All products"],
@@ -1087,6 +1413,7 @@ elif page == "Price List":
                     "product_name as they are."
                 )
 
+    
 # add button to add pricing for existing products
     
     st.divider()
@@ -1736,6 +2063,14 @@ elif page == "Excel Import":
                 horizontal=True,
             )
 
+ # to ignore empty cells and update other completed           
+            if (
+                table == "product_accessories"
+                and mode == "Update existing"
+                and "unit_price" in mapped.columns
+            ):
+                mapped = mapped[mapped["unit_price"].notna()].reset_index(drop=True)
+# to ignore empty cells and update other completed  
             match_key = None
 
             if mode == "Update existing":
