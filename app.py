@@ -1410,6 +1410,7 @@ elif page == "Price List":
 
                 detail_df = pd.DataFrame(detail_rows)
                 summary_df = pd.DataFrame(summary_rows)
+                summary_df = apply_currency_totals(detail_df, summary_df)
 
                 cd_buffer = io.BytesIO()
                 with pd.ExcelWriter(cd_buffer, engine="openpyxl") as writer:
@@ -2153,6 +2154,7 @@ elif page == "Price List":
 
                 vw_detail_df = pd.DataFrame(vw_detail)
                 vw_summary_df = pd.DataFrame(vw_summary)
+                vw_summary_df = apply_currency_totals(vw_detail_df, vw_summary_df)
 
                 m1, m2, m3 = st.columns(3)
                 m1.metric("Devices", len(vw_summary_df))
