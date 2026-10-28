@@ -149,7 +149,7 @@ TABLES = {
         "columns": [
             "id", "product_name", "product_id", "accessory_name",
             "accessory_type", "manufacturer", "model", "quantity", "unit",
-            "supplier_id", "unit_price", "notes",
+            "supplier_id", "unit_price", "currency", "notes",
         ],
         "required": ["accessory_name"],
         "key": "id",
@@ -865,7 +865,8 @@ elif page == "Accessories":
                 ("accessory_type", "text"), ("manufacturer", "text"),
                 ("model", "text"), ("quantity", "number"),
                 ("unit", "text"), ("supplier_id", "supplier"),
-                ("unit_price", "number"), ("notes", "textarea"),
+                ("unit_price", "number"), ("currency", "text"), 
+                ("notes", "textarea"),
             ],
             "Add Accessory",
         )
@@ -1810,6 +1811,11 @@ elif page == "Price List":
                                 continue
 
                             payload = {"unit_price": price}
+                            acc_currency = clean_value(row.get("currency"))
+                            if acc_currency is not None:
+                                payload["currency"] = (
+                                    str(acc_currency).strip().upper()
+                                )
                             if supplier_id is not None:
                                 payload["supplier_id"] = supplier_id
                             accessory_updates.append(
