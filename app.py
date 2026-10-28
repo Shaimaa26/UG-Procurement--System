@@ -2189,6 +2189,14 @@ elif page == "Price List":
     #     key="csv_product_prices",
     # )
 
+#checkbox if not expander:
+
+    if not st.checkbox(
+        "Show price records table", value=False, key="show_price_records"
+    ):
+        st.stop()
+#checkbox if not expander
+
     products_df = pd.DataFrame(fetch_rows("products"))
     prices_df = pd.DataFrame(fetch_rows("product_prices"))
 
