@@ -971,6 +971,126 @@ elif page == "Price List":
 # add button to just complete price for exisitng products
     with st.expander("Download price template for existing products"):
 
+        template_scope = st.radio(
+            "Products to include",
+            ["Only products without a price", "All products"],
+            horizontal=True,
+            key="price_template_scope",
+        )
+
+        tpl_products = pd.DataFrame(fetch_rows("products"))
+        tpl_prices = pd.DataFrame(fetch_rows("product_prices"))
+
+        if tpl_products.empty:
+            st.info("No products yet.")
+        else:
+            for col in ["id", "product_name", "category", "manufacturer",
+                        "model", "unit"]:
+                if col not in tpl_products.columns:
+                    tpl_products[col] = None
+            if "product_id" not in tpl_prices.columns:
+                tpl_prices["product_id"] = None
+
+            def tpl_key(v):
+                if pd.isna(v):
+                    return None
+                if isinstance(v, float) and v.is_integer():
+                    return str(int(v))
+                return str(v)
+
+            if template_scope == "Only products without a price":
+                priced_ids = {
+                    tpl_key(v) for v in tpl_prices["product_id"].dropna()
+                }
+                tpl_products = tpl_products[
+                    ~tpl_products["id"].map(tpl_key).isin(priced_ids)
+                ]
+
+            if tpl_products.empty:
+                st.info("All products already have a price.")
+            else:
+                tpl_df = pd.DataFrame({
+                    "product_id": tpl_products["id"],
+                    "product_name": tpl_products["product_name"],
+                    "category": tpl_products["category"],
+                    "manufacturer": tpl_products["manufacturer"],
+                    "model": tpl_products["model"],
+                    "unit": tpl_products["unit"],
+                    "supplier_name": None,
+                    "unit_price": None,
+                    "currency": None,
+                    "price_date": None,
+                    "quote_reference": None,
+                    "notes": None,
+                }).sort_values("product_name", na_position="last")
+
+                sup_names = sorted(
+                    str(n) for n in price_suppliers.values()
+                )
+
+                tpl_buffer = io.BytesIO()
+                with pd.ExcelWriter(tpl_buffer, engine="openpyxl") as writer:
+                    tpl_df.to_excel(writer, sheet_name="Template", index=False)
+                    pd.DataFrame({"supplier_name": sup_names}).to_excel(
+                        writer, sheet_name="Suppliers ref", index=False
+                    )
+
+                    from openpyxl.styles import Font, PatternFill
+                    from openpyxl.worksheet.datavalidation import DataValidation
+
+                    ws = writer.book["Template"]
+                    cols = list(tpl_df.columns)
+
+                    for cell in ws[1]:
+                        cell.font = Font(bold=True)
+                        if cell.value in ("supplier_name", "unit_price"):
+                            cell.fill = PatternFill("solid", fgColor="FFF2CC")
+
+                    for column_cells in ws.columns:
+                        width = max(
+                            len(str(c.value)) if c.value is not None else 0
+                            for c in column_cells
+                        )
+                        ws.column_dimensions[
+                            column_cells[0].column_letter
+                        ].width = min(max(width + 2, 14), 45)
+
+                    if sup_names:
+                        letter = ws.cell(
+                            row=1, column=cols.index("supplier_name") + 1
+                        ).column_letter
+                        dropdown = DataValidation(
+                            type="list",
+                            formula1=f"='Suppliers ref'!$A$2:$A${len(sup_names) + 1}",
+                            allow_blank=True,
+                            showErrorMessage=True,
+                            errorStyle="warning",
+                            errorTitle="Unknown supplier",
+                            error="This supplier is not saved yet. Add it in Suppliers first.",
+                        )
+                        ws.add_data_validation(dropdown)
+                        dropdown.add(f"{letter}2:{letter}{len(tpl_df) + 1}")
+
+                st.caption(f"{len(tpl_df)} product(s) in the file")
+                st.download_button(
+                    "Download price template (Excel)",
+                    tpl_buffer.getvalue(),
+                    file_name="product_prices_to_complete.xlsx",
+                    mime=(
+                        "application/vnd.openxmlformats-officedocument."
+                        "spreadsheetml.sheet"
+                    ),
+                    key="price_template_download",
+                )
+                st.caption(
+                    "Fill supplier_name, unit_price, currency and price_date "
+                    "(yellow headers are the main ones). Keep product_id and "
+                    "product_name as they are."
+                )
+
+    
+# add button to add pricing for existing products
+
 # adding accessories with products in 1 file of pricing
     with st.expander("Download accessories price template"):
         at_scope = st.radio(
@@ -1295,126 +1415,8 @@ elif page == "Price List":
                 )
         
 
-# adding accessories with products in 1 file of pricing        
-        template_scope = st.radio(
-            "Products to include",
-            ["Only products without a price", "All products"],
-            horizontal=True,
-            key="price_template_scope",
-        )
-
-        tpl_products = pd.DataFrame(fetch_rows("products"))
-        tpl_prices = pd.DataFrame(fetch_rows("product_prices"))
-
-        if tpl_products.empty:
-            st.info("No products yet.")
-        else:
-            for col in ["id", "product_name", "category", "manufacturer",
-                        "model", "unit"]:
-                if col not in tpl_products.columns:
-                    tpl_products[col] = None
-            if "product_id" not in tpl_prices.columns:
-                tpl_prices["product_id"] = None
-
-            def tpl_key(v):
-                if pd.isna(v):
-                    return None
-                if isinstance(v, float) and v.is_integer():
-                    return str(int(v))
-                return str(v)
-
-            if template_scope == "Only products without a price":
-                priced_ids = {
-                    tpl_key(v) for v in tpl_prices["product_id"].dropna()
-                }
-                tpl_products = tpl_products[
-                    ~tpl_products["id"].map(tpl_key).isin(priced_ids)
-                ]
-
-            if tpl_products.empty:
-                st.info("All products already have a price.")
-            else:
-                tpl_df = pd.DataFrame({
-                    "product_id": tpl_products["id"],
-                    "product_name": tpl_products["product_name"],
-                    "category": tpl_products["category"],
-                    "manufacturer": tpl_products["manufacturer"],
-                    "model": tpl_products["model"],
-                    "unit": tpl_products["unit"],
-                    "supplier_name": None,
-                    "unit_price": None,
-                    "currency": None,
-                    "price_date": None,
-                    "quote_reference": None,
-                    "notes": None,
-                }).sort_values("product_name", na_position="last")
-
-                sup_names = sorted(
-                    str(n) for n in price_suppliers.values()
-                )
-
-                tpl_buffer = io.BytesIO()
-                with pd.ExcelWriter(tpl_buffer, engine="openpyxl") as writer:
-                    tpl_df.to_excel(writer, sheet_name="Template", index=False)
-                    pd.DataFrame({"supplier_name": sup_names}).to_excel(
-                        writer, sheet_name="Suppliers ref", index=False
-                    )
-
-                    from openpyxl.styles import Font, PatternFill
-                    from openpyxl.worksheet.datavalidation import DataValidation
-
-                    ws = writer.book["Template"]
-                    cols = list(tpl_df.columns)
-
-                    for cell in ws[1]:
-                        cell.font = Font(bold=True)
-                        if cell.value in ("supplier_name", "unit_price"):
-                            cell.fill = PatternFill("solid", fgColor="FFF2CC")
-
-                    for column_cells in ws.columns:
-                        width = max(
-                            len(str(c.value)) if c.value is not None else 0
-                            for c in column_cells
-                        )
-                        ws.column_dimensions[
-                            column_cells[0].column_letter
-                        ].width = min(max(width + 2, 14), 45)
-
-                    if sup_names:
-                        letter = ws.cell(
-                            row=1, column=cols.index("supplier_name") + 1
-                        ).column_letter
-                        dropdown = DataValidation(
-                            type="list",
-                            formula1=f"='Suppliers ref'!$A$2:$A${len(sup_names) + 1}",
-                            allow_blank=True,
-                            showErrorMessage=True,
-                            errorStyle="warning",
-                            errorTitle="Unknown supplier",
-                            error="This supplier is not saved yet. Add it in Suppliers first.",
-                        )
-                        ws.add_data_validation(dropdown)
-                        dropdown.add(f"{letter}2:{letter}{len(tpl_df) + 1}")
-
-                st.caption(f"{len(tpl_df)} product(s) in the file")
-                st.download_button(
-                    "Download price template (Excel)",
-                    tpl_buffer.getvalue(),
-                    file_name="product_prices_to_complete.xlsx",
-                    mime=(
-                        "application/vnd.openxmlformats-officedocument."
-                        "spreadsheetml.sheet"
-                    ),
-                    key="price_template_download",
-                )
-                st.caption(
-                    "Fill supplier_name, unit_price, currency and price_date "
-                    "(yellow headers are the main ones). Keep product_id and "
-                    "product_name as they are."
-                )
-
-    
-# add button to add pricing for existing products
+# adding accessories with products in 1 file of pricing.       
+        
     
     st.divider()
 
