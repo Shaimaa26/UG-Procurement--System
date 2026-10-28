@@ -1381,7 +1381,11 @@ elif page == "Price List":
                             "quantity": None if pd.isna(qty) else qty,
                             "unit": acc["unit"],
                             "unit_price": None if pd.isna(price) else price,
-                            "currency": dev_currency,
+                            "currency": (
+                                acc.get("currency")
+                                if pd.notna(acc.get("currency"))
+                                else dev_currency
+                            ),
                             "line_total": line_total,
                             "price_supplier": cd_suppliers.get(
                                 cd_key(acc["supplier_id"])
@@ -2123,7 +2127,11 @@ elif page == "Price List":
                             "quantity": None if pd.isna(qty) else qty,
                             "unit": acc["unit"],
                             "unit_price": None if pd.isna(price) else price,
-                            "currency": dev_currency,
+                            "currency": (
+                                acc.get("currency")
+                                if pd.notna(acc.get("currency"))
+                                else dev_currency
+                            ),
                             "line_total": line_total,
                             "price_supplier": vw_sup.get(
                                 vw_key(acc["supplier_id"])
