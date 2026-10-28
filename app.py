@@ -635,6 +635,47 @@ def build_template(label, include_id=False):
 
     return output.getvalue()
 
+#### For mixed currencies:
+
+def apply_currency_totals(detail_df, summary_df):
+    """Recalculate totals per device without mixing currencies."""
+    detail = detail_df.copy()
+    detail["line_total"] = pd.to_numeric(detail["line_total"], errors="coerce")
+    result = summary_df.copy()
+
+    currencies_out = []
+    acc_totals = []
+    complete_totals = []
+
+    for device in result["device"]:
+        rows = detail[
+            (detail["device"] == device) & detail["line_total"].notna()
+        ]
+        currencies = sorted({
+            str(c).strip() for c in rows["currency"].dropna()
+            if str(c).strip()
+        })
+        acc_rows = rows[rows["item_type"] == "Accessory"]
+
+        if len(currencies) > 1:
+            currencies_out.append("MIXED: " + ", ".join(currencies))
+            acc_totals.append(None)
+            complete_totals.append(None)
+        else:
+            currencies_out.append(currencies[0] if currencies else None)
+            acc_totals.append(
+                acc_rows["line_total"].sum() if not acc_rows.empty else None
+            )
+            complete_totals.append(
+                rows["line_total"].sum() if not rows.empty else None
+            )
+
+    result["currency"] = currencies_out
+    result["accessories_total"] = acc_totals
+    result["complete_total"] = complete_totals
+    return result
+    
+# for Mixed currencies.
 
 # =========================================================
 # LOGIN
@@ -1780,6 +1821,10 @@ elif page == "Price List":
                                 optional_value = clean_value(row.get(optional))
                                 if optional_value is not None:
                                     record[optional] = optional_value
+                                if "currency" in record:
+                                    record["currency"] = (
+                                        str(record["currency"]).strip().upper()
+                                    )
 
                             dup_key = (
                                 imp_key(product_id),
