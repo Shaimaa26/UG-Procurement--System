@@ -1722,7 +1722,10 @@ elif page == "Excel Import":
 
             mapped = mapped.astype(object).where(pd.notna(mapped), None)
             mapped = mapped.dropna(how="all").reset_index(drop=True)
-
+    # added for empty rows "unit price in importing       
+            if table == "product_prices" and "unit_price" in mapped.columns:
+                mapped = mapped[mapped["unit_price"].notna()].reset_index(drop=True)
+    # added for empty rows "unit price in importing  
             if mapped.empty:
                 st.warning("No mapped data found.")
                 st.stop()
