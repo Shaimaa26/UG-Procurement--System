@@ -1417,6 +1417,491 @@ elif page == "Price List":
 
 # adding accessories with products in 1 file of pricing.       
         
+# updated to import one time in one file for products and accessories
+
+    with st.expander("Download combined price file (devices + accessories)"):
+        cp_scope = st.radio(
+            "Items to include",
+            ["Only items without a price", "All items"],
+            horizontal=True,
+            key="cp_scope",
+        )
+        cp_only_acc = st.checkbox(
+            "Only products that have accessories",
+            value=False,
+            key="cp_only_acc",
+        )
+
+        cp_products = pd.DataFrame(fetch_rows("products"))
+        cp_acc = pd.DataFrame(fetch_rows("product_accessories"))
+        cp_prices = pd.DataFrame(fetch_rows("product_prices"))
+        cp_sup = {
+            str(k): v
+            for k, v in get_choices("suppliers", "supplier_name").items()
+        }
+
+        def cp_key(v):
+            if v is None:
+                return None
+            try:
+                if pd.isna(v):
+                    return None
+            except (TypeError, ValueError):
+                pass
+            if isinstance(v, float) and v.is_integer():
+                return str(int(v))
+            return str(v)
+
+        if cp_products.empty:
+            st.info("No products yet.")
+        else:
+            for col in ["id", "product_name", "manufacturer", "model", "unit"]:
+                if col not in cp_products.columns:
+                    cp_products[col] = None
+            for col in ["id", "product_id", "accessory_name", "accessory_type",
+                        "manufacturer", "model", "quantity", "unit",
+                        "unit_price", "supplier_id"]:
+                if col not in cp_acc.columns:
+                    cp_acc[col] = None
+            if "product_id" not in cp_prices.columns:
+                cp_prices["product_id"] = None
+
+            cp_acc["_k"] = cp_acc["product_id"].map(cp_key)
+            priced_products = {
+                cp_key(v) for v in cp_prices["product_id"].dropna()
+            }
+
+            cp_rows = []
+
+            for _, prod in cp_products.sort_values(
+                "product_name", na_position="last"
+            ).iterrows():
+                pk = cp_key(prod["id"])
+                prod_acc = cp_acc[cp_acc["_k"] == pk]
+
+                if cp_only_acc and prod_acc.empty:
+                    continue
+
+                if cp_scope == "Only items without a price":
+                    include_device = pk not in priced_products
+                    prod_acc = prod_acc[
+                        pd.to_numeric(prod_acc["unit_price"], errors="coerce").isna()
+                    ]
+                else:
+                    include_device = True
+
+                if not include_device and prod_acc.empty:
+                    continue
+
+                if include_device:
+                    cp_rows.append({
+                        "item_type": "Device",
+                        "device": prod["product_name"],
+                        "product_id": prod["id"],
+                        "accessory_id": None,
+                        "accessory_type": None,
+                        "item_name": prod["product_name"],
+                        "manufacturer": prod["manufacturer"],
+                        "model": prod["model"],
+                        "quantity": None,
+                        "unit": prod["unit"],
+                        "supplier_name": None,
+                        "unit_price": None,
+                        "currency": None,
+                        "price_date": None,
+                        "quote_reference": None,
+                        "notes": None,
+                    })
+
+                for _, acc in prod_acc.iterrows():
+                    cp_rows.append({
+                        "item_type": "Accessory",
+                        "device": prod["product_name"],
+                        "product_id": prod["id"],
+                        "accessory_id": acc["id"],
+                        "accessory_type": acc["accessory_type"],
+                        "item_name": acc["accessory_name"],
+                        "manufacturer": acc["manufacturer"],
+                        "model": acc["model"],
+                        "quantity": acc["quantity"],
+                        "unit": acc["unit"],
+                        "supplier_name": cp_sup.get(cp_key(acc["supplier_id"])),
+                        "unit_price": None,
+                        "currency": None,
+                        "price_date": None,
+                        "quote_reference": None,
+                        "notes": None,
+                    })
+
+            if not cp_rows:
+                st.info("Nothing to include. All items already have a price.")
+            else:
+                cp_df_out = pd.DataFrame(cp_rows)
+                sup_list = sorted(str(n) for n in cp_sup.values())
+
+                cp_buffer = io.BytesIO()
+                with pd.ExcelWriter(cp_buffer, engine="openpyxl") as writer:
+                    cp_df_out.to_excel(writer, sheet_name="Template", index=False)
+                    pd.DataFrame({"supplier_name": sup_list}).to_excel(
+                        writer, sheet_name="Suppliers ref", index=False
+                    )
+
+                    from openpyxl.styles import Font, PatternFill
+                    from openpyxl.worksheet.datavalidation import DataValidation
+
+                    ws = writer.book["Template"]
+                    out_cols = list(cp_df_out.columns)
+                    yellow_cols = ("supplier_name", "unit_price",
+                                   "currency", "price_date")
+
+                    for cell in ws[1]:
+                        cell.font = Font(bold=True)
+                        if cell.value in yellow_cols:
+                            cell.fill = PatternFill("solid", fgColor="FFF2CC")
+
+                    for row in ws.iter_rows(min_row=2):
+                        if row[0].value == "Device":
+                            for cell in row:
+                                cell.fill = PatternFill("solid", fgColor="E7F0FA")
+                                cell.font = Font(bold=True)
+
+                    for column_cells in ws.columns:
+                        width = max(
+                            len(str(c.value)) if c.value is not None else 0
+                            for c in column_cells
+                        )
+                        ws.column_dimensions[
+                            column_cells[0].column_letter
+                        ].width = min(max(width + 2, 12), 45)
+
+                    if sup_list:
+                        letter = ws.cell(
+                            row=1, column=out_cols.index("supplier_name") + 1
+                        ).column_letter
+                        dropdown = DataValidation(
+                            type="list",
+                            formula1=f"='Suppliers ref'!$A$2:$A${len(sup_list) + 1}",
+                            allow_blank=True,
+                            showErrorMessage=True,
+                            errorStyle="warning",
+                            errorTitle="Unknown supplier",
+                            error="This supplier is not saved yet. Add it in Suppliers first.",
+                        )
+                        ws.add_data_validation(dropdown)
+                        dropdown.add(f"{letter}2:{letter}{len(cp_df_out) + 1}")
+
+                st.caption(f"{len(cp_df_out)} row(s) in the file")
+                st.download_button(
+                    "Download combined price file (Excel)",
+                    cp_buffer.getvalue(),
+                    file_name="devices_and_accessories_prices.xlsx",
+                    mime=(
+                        "application/vnd.openxmlformats-officedocument."
+                        "spreadsheetml.sheet"
+                    ),
+                    key="cp_download",
+                )
+                st.caption(
+                    "Fill supplier_name, unit_price, currency and price_date. "
+                    "Leave rows without a price empty. Do not change "
+                    "item_type, product_id or accessory_id."
+                )
+
+
+ #import combined file once::
+        
+    with st.expander("Import combined price file (devices + accessories)"):
+        cp_file = st.file_uploader(
+            "Upload the completed combined price file",
+            type=["xlsx", "xls"],
+            key="cp_upload",
+        )
+
+        if cp_file:
+            try:
+                def imp_key(v):
+                    if v is None:
+                        return None
+                    try:
+                        if pd.isna(v):
+                            return None
+                    except (TypeError, ValueError):
+                        pass
+                    if isinstance(v, float) and v.is_integer():
+                        return str(int(v))
+                    return str(v)
+
+                imp_bytes = cp_file.getvalue()
+                imp_excel = pd.ExcelFile(io.BytesIO(imp_bytes))
+                imp_sheet = (
+                    "Template" if "Template" in imp_excel.sheet_names
+                    else imp_excel.sheet_names[0]
+                )
+                imp_df = pd.read_excel(
+                    io.BytesIO(imp_bytes), sheet_name=imp_sheet, dtype=object
+                )
+                imp_df.columns = [
+                    normalize_column(c).replace(" ", "_") for c in imp_df.columns
+                ]
+
+                missing_cols = [
+                    c for c in ("item_type", "unit_price")
+                    if c not in imp_df.columns
+                ]
+
+                if missing_cols:
+                    st.error(
+                        "This file is missing the column(s): "
+                        + ", ".join(missing_cols)
+                        + ". Use the combined price file downloaded above."
+                    )
+                else:
+                    imp_suppliers = {
+                        str(n).strip().lower(): k
+                        for k, n in get_choices(
+                            "suppliers", "supplier_name"
+                        ).items()
+                    }
+                    imp_product_names = {}
+                    imp_product_ids = set()
+                    for k, n in get_choices("products", "product_name").items():
+                        imp_product_names.setdefault(
+                            str(n).strip().lower(), []
+                        ).append(k)
+                        imp_product_ids.add(imp_key(k))
+
+                    imp_acc_ids = {
+                        imp_key(r.get("id"))
+                        for r in fetch_rows("product_accessories")
+                    }
+
+                    existing_prices = set()
+                    for r in fetch_rows("product_prices"):
+                        try:
+                            p = round(float(r.get("unit_price")), 6)
+                        except (TypeError, ValueError):
+                            p = None
+                        existing_prices.add((
+                            imp_key(r.get("product_id")),
+                            imp_key(r.get("supplier_id")),
+                            p,
+                            (str(r.get("price_date") or "")[:10]) or None,
+                        ))
+
+                    device_records = []
+                    accessory_updates = []
+                    imp_errors = []
+                    skipped_empty = 0
+                    skipped_duplicates = 0
+                    seen_prices = set()
+
+                    for idx, row in imp_df.iterrows():
+                        row_no = idx + 2
+                        price_raw = clean_value(row.get("unit_price"))
+
+                        if price_raw is None:
+                            skipped_empty += 1
+                            continue
+
+                        item_type = str(
+                            clean_value(row.get("item_type")) or ""
+                        ).strip().lower()
+
+                        try:
+                            price = float(Decimal(str(price_raw)))
+                            if price < 0:
+                                raise ValueError("negative")
+                        except Exception:
+                            imp_errors.append({
+                                "Excel row": row_no,
+                                "Errors": "unit_price must be a number, zero or more",
+                            })
+                            continue
+
+                        supplier_text = clean_value(row.get("supplier_name"))
+                        supplier_id = None
+                        if supplier_text is not None:
+                            supplier_id = imp_suppliers.get(
+                                str(supplier_text).strip().lower()
+                            )
+                            if supplier_id is None:
+                                imp_errors.append({
+                                    "Excel row": row_no,
+                                    "Errors": f"Supplier not found: {supplier_text}",
+                                })
+                                continue
+
+                        if item_type == "device":
+                            product_id = clean_value(row.get("product_id"))
+
+                            if product_id is None:
+                                device_name = clean_value(row.get("device"))
+                                found = (
+                                    imp_product_names.get(
+                                        str(device_name).strip().lower(), []
+                                    )
+                                    if device_name else []
+                                )
+                                if len(found) == 1:
+                                    product_id = found[0]
+                                else:
+                                    imp_errors.append({
+                                        "Excel row": row_no,
+                                        "Errors": "Missing or unclear product_id",
+                                    })
+                                    continue
+                            elif imp_key(product_id) not in imp_product_ids:
+                                imp_errors.append({
+                                    "Excel row": row_no,
+                                    "Errors": f"product_id {product_id} does not exist",
+                                })
+                                continue
+
+                            date_value = clean_value(row.get("price_date"))
+                            if date_value is not None:
+                                try:
+                                    date_value = pd.to_datetime(
+                                        date_value
+                                    ).date().isoformat()
+                                except Exception:
+                                    imp_errors.append({
+                                        "Excel row": row_no,
+                                        "Errors": "price_date is not a valid date",
+                                    })
+                                    continue
+
+                            record = {"product_id": product_id, "unit_price": price}
+                            if supplier_id is not None:
+                                record["supplier_id"] = supplier_id
+                            if date_value is not None:
+                                record["price_date"] = date_value
+                            for optional in ("currency", "quote_reference", "notes"):
+                                optional_value = clean_value(row.get(optional))
+                                if optional_value is not None:
+                                    record[optional] = optional_value
+
+                            dup_key = (
+                                imp_key(product_id),
+                                imp_key(supplier_id),
+                                round(price, 6),
+                                date_value,
+                            )
+                            if dup_key in existing_prices or dup_key in seen_prices:
+                                skipped_duplicates += 1
+                                continue
+
+                            seen_prices.add(dup_key)
+                            device_records.append((row_no, record))
+
+                        elif item_type == "accessory":
+                            accessory_id = clean_value(row.get("accessory_id"))
+
+                            if accessory_id is None:
+                                imp_errors.append({
+                                    "Excel row": row_no,
+                                    "Errors": "Missing accessory_id",
+                                })
+                                continue
+                            if imp_key(accessory_id) not in imp_acc_ids:
+                                imp_errors.append({
+                                    "Excel row": row_no,
+                                    "Errors": f"accessory_id {accessory_id} does not exist",
+                                })
+                                continue
+
+                            payload = {"unit_price": price}
+                            if supplier_id is not None:
+                                payload["supplier_id"] = supplier_id
+                            accessory_updates.append(
+                                (row_no, accessory_id, payload)
+                            )
+
+                        else:
+                            imp_errors.append({
+                                "Excel row": row_no,
+                                "Errors": "item_type must be Device or Accessory",
+                            })
+
+                    s1, s2, s3, s4 = st.columns(4)
+                    s1.metric("Device prices to add", len(device_records))
+                    s2.metric("Accessory prices to update", len(accessory_updates))
+                    s3.metric("Skipped (no price)", skipped_empty)
+                    s4.metric("Skipped (already saved)", skipped_duplicates)
+
+                    if imp_errors:
+                        st.write(f"Rows with errors: {len(imp_errors)}")
+                        imp_error_df = pd.DataFrame(imp_errors)
+                        st.dataframe(
+                            imp_error_df, use_container_width=True, hide_index=True
+                        )
+
+                    imp_partial = st.checkbox(
+                        "Import valid rows even if some rows contain errors",
+                        value=False,
+                        key="cp_partial",
+                    )
+
+                    imp_can_import = bool(
+                        device_records or accessory_updates
+                    ) and (not imp_errors or imp_partial)
+
+                    if st.button(
+                        "Import prices",
+                        type="primary",
+                        disabled=not imp_can_import,
+                        key="cp_import_btn",
+                    ):
+                        total_jobs = len(device_records) + len(accessory_updates)
+                        progress = st.progress(0)
+                        done = 0
+                        inserted = 0
+                        updated = 0
+                        db_errors = []
+
+                        for row_no, record in device_records:
+                            try:
+                                supabase.table("product_prices").insert(
+                                    record
+                                ).execute()
+                                inserted += 1
+                            except Exception as exc:
+                                db_errors.append({
+                                    "Excel row": row_no, "Error": str(exc)
+                                })
+                            done += 1
+                            progress.progress(done / total_jobs)
+
+                        for row_no, accessory_id, payload in accessory_updates:
+                            try:
+                                supabase.table("product_accessories").update(
+                                    payload
+                                ).eq("id", accessory_id).execute()
+                                updated += 1
+                            except Exception as exc:
+                                db_errors.append({
+                                    "Excel row": row_no, "Error": str(exc)
+                                })
+                            done += 1
+                            progress.progress(done / total_jobs)
+
+                        st.success(
+                            f"Finished. Device prices added: {inserted}; "
+                            f"Accessory prices updated: {updated}; "
+                            f"Database errors: {len(db_errors)}"
+                        )
+
+                        if db_errors:
+                            st.dataframe(
+                                pd.DataFrame(db_errors),
+                                use_container_width=True,
+                                hide_index=True,
+                            )
+
+            except Exception as exc:
+                st.error(f"Import error: {exc}")
+# import combined files once.
+    
+# updated to import one time in one file for products and accessories    
     
     st.divider()
 
