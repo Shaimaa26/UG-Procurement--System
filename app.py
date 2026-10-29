@@ -1098,7 +1098,7 @@ elif page == "Price List":
             if cd_prices.empty:
                 best = pd.DataFrame(columns=[
                     "_k", "device_price", "currency", "device_supplier",
-                    "device_date",
+                    "device_date", "device_quote", "device_notes",
                 ])
             else:
                 if price_basis == "Latest price":
@@ -1111,11 +1111,13 @@ elif page == "Price List":
                     ).drop_duplicates("_k", keep="first")
                 best = best[[
                     "_k", "unit_price", "currency", "supplier_name",
-                    "price_date",
+                    "price_date", "quote_reference", "notes",
                 ]].rename(columns={
                     "unit_price": "device_price",
                     "supplier_name": "device_supplier",
                     "price_date": "device_date",
+                    "quote_reference": "device_quote",
+                    "notes": "device_notes",
                 })
 
             devices = cd_products.merge(best, on="_k", how="left")
