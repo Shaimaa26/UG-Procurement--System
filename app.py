@@ -1514,6 +1514,13 @@ elif page == "Price List":
                         if currency_text is not None:
                             currency_text = str(currency_text).strip().upper()
 
+                        quote_text = clean_value(row.get("quote_reference"))
+                        if quote_text is not None:
+                            quote_text = (
+                                str(quote_text).strip().strip("\"'").strip()
+                                or None
+                            )
+
                         # ---------- Device rows ----------
                         if item_type == "device":
                             product_id = clean_value(row.get("product_id"))
@@ -1571,6 +1578,8 @@ elif page == "Price List":
                                 optional_value = clean_value(row.get(optional))
                                 if optional_value is not None:
                                     record[optional] = optional_value
+                                if quote_text is not None:
+                                    record["quote_reference"] = quote_text
 
                             match_key = (
                                 pl_key(product_id),
