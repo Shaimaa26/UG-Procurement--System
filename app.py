@@ -1363,6 +1363,56 @@ elif page == "Price List":
                         columns={"price_supplier": "supplier_name"}
                     )
 
+                
+#update error of updating data in table:
+                header_aliases = {
+                    "date": "price_date",
+                    "quote_date": "price_date",
+                    "quotation_date": "price_date",
+                    "quote": "quote_reference",
+                    "quote_ref": "quote_reference",
+                    "quote_no": "quote_reference",
+                    "quote_number": "quote_reference",
+                    "quotation": "quote_reference",
+                    "quotation_no": "quote_reference",
+                    "quotation_reference": "quote_reference",
+                    "reference": "quote_reference",
+                    "ref": "quote_reference",
+                }
+                imp_df = imp_df.rename(columns={
+                    old: new for old, new in header_aliases.items()
+                    if old in imp_df.columns and new not in imp_df.columns
+                })
+
+                if st.checkbox(
+                    "Show how the app read this file", key="cp_debug"
+                ):
+                    st.write("Sheet read:", imp_sheet)
+                    st.write("Columns found:", ", ".join(imp_df.columns))
+
+                    for needed in ("price_date", "quote_reference"):
+                        if needed in imp_df.columns:
+                            filled = int(imp_df[needed].notna().sum())
+                            st.write(f"{needed}: found, {filled} filled cell(s)")
+                        else:
+                            st.warning(f"{needed}: column NOT found in the file")
+
+                    shown = [
+                        c for c in [
+                            "item_type", "device", "item_name", "product_id",
+                            "accessory_id", "supplier_name", "unit_price",
+                            "price_date", "quote_reference",
+                        ] if c in imp_df.columns
+                    ]
+                    st.dataframe(
+                        imp_df[shown].head(40),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+#update error of updating data in table
+                
+
                 missing_cols = [
                     c for c in ("item_type", "unit_price")
                     if c not in imp_df.columns
