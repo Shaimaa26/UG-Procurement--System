@@ -1196,9 +1196,9 @@ elif page == "Price List":
                             ),
                             "unit_price": price,
                             "currency": pl_val(acc["currency"]),
-                            "price_date": None,
-                            "quote_reference": None,
-                            "notes": None,
+                            "price_date": pl_val(acc["price_date"]),
+                            "quote_reference": pl_val(acc["quote_reference"]),
+                            "notes": pl_val(acc["notes"]),
                             "line_total": line_total,
                         })
 
