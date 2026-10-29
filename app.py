@@ -150,7 +150,7 @@ TABLES = {
             "id", "product_name", "product_id", "accessory_name",
             "accessory_type", "manufacturer", "model", "quantity", "unit",
             "supplier_id", "unit_price", "price_date",
-            "quote_reference" "currency", "notes",
+            "quote_reference", "currency", "notes",
         ],
         "required": ["accessory_name"],
         "key": "id",
