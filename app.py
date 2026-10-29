@@ -1159,8 +1159,8 @@ elif page == "Price List":
                         "unit_price": dev_price,
                         "currency": dev_currency,
                         "price_date": pl_val(dev.get("device_date")),
-                        "quote_reference": None,
-                        "notes": None,
+                        "quote_reference": pl_val(dev.get("device_quote")),
+                        "notes": pl_val(dev.get("device_notes")),
                         "line_total": dev_price,
                     })
 
