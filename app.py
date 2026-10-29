@@ -1398,20 +1398,24 @@ elif page == "Price List":
                         )
                         acc_by_name.setdefault(name_key, []).append(r.get("id"))
 
-                    existing_prices = set()
+                    existing_by_key = {}
                     for r in fetch_rows("product_prices"):
                         try:
                             p = round(float(r.get("unit_price")), 6)
                         except (TypeError, ValueError):
-                            p = None
-                        existing_prices.add((
-                            pl_key(r.get("product_id")),
-                            pl_key(r.get("supplier_id")),
-                            p,
-                            (str(r.get("price_date") or "")[:10]) or None,
-                        ))
+                            continue
+                        existing_by_key.setdefault(
+                            (
+                                pl_key(r.get("product_id")),
+                                pl_key(r.get("supplier_id")),
+                                p,
+                            ),
+                            [],
+                        ).append(r)
 
                     device_records = []
+                    price_updates = []
+                    updated_ids = set()
                     accessory_updates = []
                     imp_errors = []
                     skipped_empty = 0
@@ -1516,13 +1520,65 @@ elif page == "Price List":
                                 if optional_value is not None:
                                     record[optional] = optional_value
 
+                            match_key = (
+                                pl_key(product_id),
+                                pl_key(supplier_id),
+                                round(price, 6),
+                            )
+                            existing_match = None
+                            for candidate in existing_by_key.get(match_key, []):
+                                saved_date = (
+                                    str(candidate.get("price_date") or "")[:10]
+                                    or None
+                                )
+                                if (
+                                    date_value is None
+                                    or saved_date is None
+                                    or saved_date == date_value
+                                ):
+                                    existing_match = candidate
+                                    break
+
+                            if existing_match is not None:
+                                changes = {}
+                                for field, new_value in (
+                                    ("price_date", date_value),
+                                    ("quote_reference", record.get("quote_reference")),
+                                    ("notes", record.get("notes")),
+                                    ("currency", record.get("currency")),
+                                ):
+                                    if new_value is None:
+                                        continue
+                                    saved_value = existing_match.get(field)
+                                    if field == "price_date":
+                                        saved_value = (
+                                            str(saved_value or "")[:10] or None
+                                        )
+                                    if (
+                                        str(saved_value or "").strip()
+                                        != str(new_value).strip()
+                                    ):
+                                        changes[field] = new_value
+
+                                if (
+                                    changes
+                                    and existing_match.get("id") not in updated_ids
+                                ):
+                                    updated_ids.add(existing_match.get("id"))
+                                    price_updates.append(
+                                        (row_no, existing_match.get("id"), changes)
+                                    )
+                                else:
+                                    skipped_saved += 1
+                                continue
+
                             dup_key = (
                                 pl_key(product_id),
                                 pl_key(supplier_id),
                                 round(price, 6),
                                 date_value,
                             )
-                            if dup_key in existing_prices or dup_key in seen_prices:
+                            if dup_key in seen_prices:
                                 skipped_saved += 1
                                 continue
 
@@ -1612,13 +1668,14 @@ elif page == "Price List":
                                 "Errors": "item_type must be Device or Accessory",
                             })
 
-                    s1, s2, s3, s4 = st.columns(4)
+                    s1, s2, s3, s4, s5 = st.columns(5)
                     s1.metric("Device prices to add", len(device_records))
-                    s2.metric(
+                    s2.metric("Device prices to update", len(price_updates))
+                    s3.metric(
                         "Accessory prices to update", len(accessory_updates)
                     )
-                    s3.metric("Skipped (no price)", skipped_empty)
-                    s4.metric("Skipped (already saved)", skipped_saved)
+                    s4.metric("Skipped (no price)", skipped_empty)
+                    s5.metric("Skipped (already saved)", skipped_saved)
 
                     if imp_errors:
                         st.write(f"Rows with errors: {len(imp_errors)}")
@@ -1715,48 +1772,8 @@ elif page == "Price List":
                                 hide_index=True,
                             )
 
-                        for row_no, record in device_records:
-                            try:
-                                supabase.table("product_prices").insert(
-                                    record
-                                ).execute()
-                                inserted += 1
-                            except Exception as exc:
-                                db_errors.append({
-                                    "Excel row": row_no, "Error": str(exc)
-                                })
-                            done += 1
-                            progress.progress(done / total_jobs)
-
-                        for row_no, accessory_id, payload in accessory_updates:
-                            try:
-                                supabase.table("product_accessories").update(
-                                    payload
-                                ).eq("id", accessory_id).execute()
-                                updated += 1
-                            except Exception as exc:
-                                db_errors.append({
-                                    "Excel row": row_no, "Error": str(exc)
-                                })
-                            done += 1
-                            progress.progress(done / total_jobs)
-
-                        st.success(
-                            f"Finished. Device prices added: {inserted}; "
-                            f"Accessory prices updated: {updated}; "
-                            f"Database errors: {len(db_errors)}"
-                        )
-
-                        if db_errors:
-                            st.dataframe(
-                                pd.DataFrame(db_errors),
-                                use_container_width=True,
-                                hide_index=True,
-                            )
-
             except Exception as exc:
                 st.error(f"Import error: {exc}")
-
     st.divider()
 
     # =====================================================
