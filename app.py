@@ -824,9 +824,6 @@ if page == "Dashboard":
     except Exception as exc:
         st.error(f"Could not load {selected_label}: {exc}")
 
-
-
-
 # #if page == "Dashboard":
 #     st.subheader("Overview")
 #     metric_cols = st.columns(5)
@@ -845,19 +842,19 @@ if page == "Dashboard":
 #     #display_table("purchase_orders")
 
 
-# elif page == "Suppliers":
-#     add_basic_form(
-#         "suppliers",
-#         [
-#             ("supplier_name", "text"), ("category", "text"),
-#             ("products", "textarea"), ("country", "text"),
-#             ("contact_person", "text"), ("contact_title", "text"),
-#             ("email", "text"), ("phone", "text"),
-#             ("payment_terms", "text"), ("notes", "textarea"),
-#         ],
-#         "Add Supplier",
-#     )
-#     display_table("suppliers")
+elif page == "Suppliers":
+    add_basic_form(
+        "suppliers",
+        [
+            ("supplier_name", "text"), ("category", "text"),
+            ("products", "textarea"), ("country", "text"),
+            ("contact_person", "text"), ("contact_title", "text"),
+            ("email", "text"), ("phone", "text"),
+            ("payment_terms", "text"), ("notes", "textarea"),
+        ],
+        "Add Supplier",
+    )
+    display_table("suppliers")
 
 
 elif page == "Projects":
