@@ -1045,9 +1045,15 @@ elif page == "Price List":
                     cd_products[col] = None
             for col in ["id", "product_id", "accessory_name", "accessory_type",
                         "manufacturer", "model", "quantity", "unit",
-                        "unit_price", "currency", "supplier_id"]:
+                        "unit_price", "currency", "supplier_id", "price_date",
+                        "quote_reference", "notes"]:
                 if col not in cd_acc.columns:
                     cd_acc[col] = None
+            for col in ["product_id", "supplier_id", "unit_price", "currency",
+                        "price_date", "quote_reference", "notes",
+                        "created_at"]:
+                if col not in cd_prices.columns:
+                    cd_prices[col] = None
             for col in ["product_id", "supplier_id", "unit_price", "currency",
                         "price_date", "created_at"]:
                 if col not in cd_prices.columns:
@@ -1696,33 +1702,55 @@ elif page == "Price List":
                             if supplier_id is not None:
                                 payload["supplier_id"] = supplier_id
 
-                            try:
-                                current_price = round(
-                                    float(current.get("unit_price")), 6
+                            acc_date = clean_value(row.get("price_date"))
+                            if acc_date is not None:
+                                try:
+                                    acc_date = pd.to_datetime(
+                                        acc_date
+                                    ).date().isoformat()
+                                except Exception:
+                                    imp_errors.append({
+                                        "Excel row": row_no,
+                                        "Errors": "price_date is not a valid date",
+                                    })
+                                    continue
+                                payload["price_date"] = acc_date
+                            if quote_text is not None:
+                                payload["quote_reference"] = quote_text
+                            acc_notes = clean_value(row.get("notes"))
+                            if acc_notes is not None:
+                                payload["notes"] = acc_notes
+
+                            def acc_same(field, new_value):
+                                old_value = current.get(field)
+                                if field == "unit_price":
+                                    try:
+                                        return round(float(old_value), 6) == round(
+                                            float(new_value), 6
+                                        )
+                                    except (TypeError, ValueError):
+                                        return False
+                                if field == "supplier_id":
+                                    return pl_key(old_value) == pl_key(new_value)
+                                if field == "price_date":
+                                    return str(old_value or "")[:10] == str(new_value)
+                                if field == "currency":
+                                    return (
+                                        str(old_value or "").strip().upper()
+                                        == str(new_value).strip().upper()
+                                    )
+                                return (
+                                    str(old_value or "").strip()
+                                    == str(new_value).strip()
                                 )
-                            except (TypeError, ValueError):
-                                current_price = None
-                            current_currency = str(
-                                current.get("currency") or ""
-                            ).strip().upper()
-                            same_price = current_price == round(price, 6)
-                            same_currency = (
-                                currency_text is None
-                                or currency_text == current_currency
-                            )
-                            same_supplier = (
-                                supplier_id is None
-                                or pl_key(supplier_id)
-                                == pl_key(current.get("supplier_id"))
-                            )
-                            if same_price and same_currency and same_supplier:
+
+                            payload = {
+                                f: v for f, v in payload.items()
+                                if not acc_same(f, v)
+                            }
+                            if not payload:
                                 skipped_saved += 1
                                 continue
-
-                            accessory_updates.append(
-                                (row_no, accessory_id, payload)
-                            )
-
                         else:
                             imp_errors.append({
                                 "Excel row": row_no,
