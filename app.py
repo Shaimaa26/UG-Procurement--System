@@ -1634,22 +1634,86 @@ elif page == "Price List":
                         key="cp_partial",
                     )
 
-                    imp_can_import = bool(
-                        device_records or accessory_updates
-                    ) and (not imp_errors or imp_partial)
+                    imp_ok = not imp_errors or imp_partial
+                    can_add = bool(device_records) and imp_ok
+                    can_update = bool(
+                        price_updates or accessory_updates
+                    ) and imp_ok
 
-                    if st.button(
-                        "Import prices",
+                    b1, b2 = st.columns(2)
+                    add_clicked = b1.button(
+                        f"Add new prices ({len(device_records)})",
                         type="primary",
-                        disabled=not imp_can_import,
-                        key="cp_import_btn",
-                    ):
-                        total_jobs = len(device_records) + len(accessory_updates)
+                        disabled=not can_add,
+                        key="cp_add_btn",
+                    )
+                    update_clicked = b2.button(
+                        "Update existing records "
+                        f"({len(price_updates) + len(accessory_updates)})",
+                        disabled=not can_update,
+                        key="cp_update_btn",
+                    )
+
+                    if add_clicked or update_clicked:
+                        jobs = []
+                        if add_clicked:
+                            jobs += [
+                                ("add", row_no, None, record)
+                                for row_no, record in device_records
+                            ]
+                        if update_clicked:
+                            jobs += [
+                                ("price", row_no, price_id, changes)
+                                for row_no, price_id, changes in price_updates
+                            ]
+                            jobs += [
+                                ("acc", row_no, accessory_id, payload)
+                                for row_no, accessory_id, payload
+                                in accessory_updates
+                            ]
+
                         progress = st.progress(0)
-                        done = 0
                         inserted = 0
-                        updated = 0
+                        updated_prices = 0
+                        updated_acc = 0
                         db_errors = []
+
+                        for position, (kind, row_no, target_id, data) in enumerate(jobs):
+                            try:
+                                if kind == "add":
+                                    supabase.table("product_prices").insert(
+                                        data
+                                    ).execute()
+                                    inserted += 1
+                                elif kind == "price":
+                                    supabase.table("product_prices").update(
+                                        data
+                                    ).eq("id", target_id).execute()
+                                    updated_prices += 1
+                                else:
+                                    supabase.table("product_accessories").update(
+                                        data
+                                    ).eq("id", target_id).execute()
+                                    updated_acc += 1
+                            except Exception as exc:
+                                db_errors.append({
+                                    "Excel row": row_no, "Error": str(exc)
+                                })
+                            progress.progress((position + 1) / len(jobs))
+
+                        st.success(
+                            f"Finished. Device prices added: {inserted}; "
+                            f"Device prices updated: {updated_prices}; "
+                            f"Accessory prices updated: {updated_acc}; "
+                            f"Database errors: {len(db_errors)}"
+                        )
+
+                        if db_errors:
+                            st.dataframe(
+                                pd.DataFrame(db_errors),
+                                use_container_width=True,
+                                hide_index=True,
+                            )
 
                         for row_no, record in device_records:
                             try:
